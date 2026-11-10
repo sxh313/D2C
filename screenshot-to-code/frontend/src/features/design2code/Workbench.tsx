@@ -555,6 +555,9 @@ export default function D2CWorkbench() {
   const sourceAvailable: Record<string, boolean> = { screenshot: images.length > 0, spec: !!spec.trim(), figma: !!figma.trim(), figma_bundle: !!bundle, instructions: !!instruction.trim() };
   const dimensionLabels: Record<Dimension, string> = { layout: "布局", style: "视觉样式", content: "内容", behavior: "交互" };
   const missingAuthority = (Object.keys(dimensionLabels) as Dimension[]).filter((dimension) => authority[dimension] && !sourceAvailable[authority[dimension]]);
+  useEffect(() => {
+    if (missingAuthority.length === 0) setError((current) => current.startsWith("来源规则已失效：") ? "" : current);
+  }, [missingAuthority.length]);
 
   async function handleGenerate() {
     if (!images.length && !spec.trim() && !figma.trim() && !bundle) { setError("请至少添加一份设计资料。"); return; }
