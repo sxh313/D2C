@@ -9,7 +9,7 @@ import zipfile
 from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from design2code.inputs import import_figma, import_figma_bundle, import_figma_mcp, import_image, import_spec
@@ -199,6 +199,38 @@ async def get_preview(run_id: str) -> dict[str, str]:
         return {"url": preview_url(run_id, get_settings(), (run["result"] or {}).get("candidate_name", "candidate"))}
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
+
+
+@router.get("/runs/{run_id}/visual-references")
+async def visual_references(run_id: str) -> dict[str, Any]:
+    run = read_run(run_id)
+    if run is None:
+        raise HTTPException(404, "找不到该任务。")
+    source_set = get_source_set(run["source_set_id"], run["source_set_revision"])
+    if source_set is None:
+        raise HTTPException(404, "找不到任务资料。")
+    references = []
+    for source in source_set["sources"]:
+        item = get_input(source["input_id"])
+        if item and item["input_type"] in {"screenshot", "figma"} and item["data"].get("content_base64"):
+            references.append({"id": item["input_id"], "type": item["input_type"],
+                               "name": item["data"].get("name") or item["input_type"],
+                               "data_url": f'data:{item["data"]["mime_type"]};base64,{item["data"]["content_base64"]}'})
+    return {"references": references}
+
+
+@router.get("/runs/{run_id}/inspection-image/{viewport}")
+async def inspection_image(run_id: str, viewport: Literal["desktop", "mobile"]) -> FileResponse:
+    run = read_run(run_id)
+    if run is None:
+        raise HTTPException(404, "找不到该任务。")
+    candidate = (run["result"] or {}).get("candidate_name", "candidate")
+    if candidate not in {"candidate", "candidate-2"}:
+        raise HTTPException(404, "找不到检查截图。")
+    path = get_settings().runtime_dir / "runs" / run_id / candidate / f"inspection-{viewport}.png"
+    if not path.is_file():
+        raise HTTPException(404, "该视口的检查截图未生成。")
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
 @router.get("/runs/{run_id}/export")

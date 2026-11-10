@@ -78,6 +78,35 @@ const statusText: Record<string, string> = {
 };
 const checkStatusText: Record<string, string> = { PASS: "通过", FAIL: "失败", NOT_RUN: "未执行", MANUAL_REVIEW: "待人工检查" };
 
+function VisualReview({ runId, candidate }: { runId: string; candidate?: string }) {
+  const [references, setReferences] = useState<{ id: string; type: string; name: string; data_url: string }[]>([]);
+  const [selected, setSelected] = useState(0);
+  const [viewport, setViewport] = useState<"desktop" | "mobile">("desktop");
+  const [error, setError] = useState("");
+  const [imageError, setImageError] = useState(false);
+  useEffect(() => {
+    let active = true;
+    setReferences([]); setSelected(0); setError("");
+    request<{ references: typeof references }>(`/runs/${runId}/visual-references`)
+      .then((data) => { if (active) setReferences(data.references); })
+      .catch(() => { if (active) setError("无法读取本次任务的参考图。"); });
+    return () => { active = false; };
+  }, [runId]);
+  useEffect(() => { setImageError(false); }, [runId, candidate, viewport]);
+  return <details className="d2c-visual-review"><summary>人工视觉对照</summary>
+    <p className="d2c-help">参考图与构建时截图并排展示。尺寸和资料用途可能不同，请结合来源规则人工判断；这里不计算相似度，也不会自动判定通过。</p>
+    {error && <p role="alert">{error}</p>}
+    <div className="d2c-visual-controls">
+      <label>参考图 <select value={selected} onChange={(event) => setSelected(Number(event.target.value))} disabled={!references.length}>
+        {references.length ? references.map((item, index) => <option key={item.id} value={index}>{item.type === "figma" ? "Figma" : "截图"}：{item.name}</option>) : <option>没有图片参考</option>}
+      </select></label>
+      <label>生成页面 <select value={viewport} onChange={(event) => setViewport(event.target.value as "desktop" | "mobile")}><option value="desktop">桌面 1440 × 900</option><option value="mobile">手机 390 × 844</option></select></label>
+    </div>
+    <div className="d2c-visual-grid"><div><strong>任务参考图</strong>{references[selected] ? <img src={references[selected].data_url} alt="任务参考图" /> : <p>本任务没有截图或 Figma 参考图。</p>}</div>
+      <div><strong>构建时页面截图</strong>{imageError ? <p>该视口截图未生成，请检查构建和视口检查结果。</p> : <img src={`${api}/runs/${runId}/inspection-image/${viewport}?candidate=${encodeURIComponent(candidate || "candidate")}`} alt="生成页面检查截图" onError={() => setImageError(true)} />}</div></div>
+  </details>;
+}
+
 export default function D2CWorkbench() {
   const [images, setImages] = useState<ImageInput[]>([]);
   const [spec, setSpec] = useState("");
@@ -307,7 +336,7 @@ export default function D2CWorkbench() {
         {!capabilities?.generation_available && <p className="d2c-help">生成暂不可用，请检查后端服务、根目录 .env 配置及 pnpm 安装。</p>}
       </section><section className="d2c-card d2c-result"><div className="d2c-section-heading"><div><span className="d2c-step">OUTPUT</span><h2>生成结果</h2></div><span className="d2c-status"><span className="d2c-dot ready" />{run ? statusText[run.status] || run.status : "等待开始"}</span></div>
         {!run && <div className="d2c-empty"><div className="d2c-paper"><LuFileCode /><span>YOUR PAGE</span><i /><i /><i /></div><strong>你的页面会显示在这里</strong><p>先添加资料，再填写本次生成要求。</p><div><LuPlus /> 截图 <LuPlus /> Spec <LuPlus /> Figma</div></div>}
-        {run && <div className="d2c-result-content">{run.error && <div className="d2c-error">{run.error}</div>}<div className="d2c-run-meta">任务 {run.run_id.slice(-8)} <span>模型请求 {run.model_requests} 次</span></div>{files.length > 0 ? <><div className="d2c-result-actions"><button type="button" className={view === "preview" ? "active" : ""} onClick={() => setView("preview")}>页面预览</button><button type="button" className={view === "code" ? "active" : ""} onClick={() => setView("code")}>查看源码</button>{["READY_FOR_REVIEW", "COMPLETE_LOCAL", "FAILED"].includes(run.status) && <a href={`${api}/runs/${run.run_id}/export`}>下载工程</a>}</div>{view === "preview" ? preview ? <><iframe ref={previewRef} title="生成页面预览" className="d2c-preview" sandbox="allow-scripts allow-forms" src={preview} onLoad={() => { setPreviewReady(true); setSelecting(false); setSelectedElement(null); selectionToken.current = ""; }} />{run.status === "READY_FOR_REVIEW" && run.repairs < 1 && run.model_requests < 2 && <div><button type="button" disabled={!previewReady} onClick={toggleSelection}>{selecting ? "取消选取" : "在预览中选取元素"}</button>{selecting && <span> 请点击预览中的元素</span>}{selectedElement && <p>已选：{selectedElement.label || "页面元素"} <button type="button" onClick={() => setSelectedElement(null)}>清除</button></p>}</div>}</> : <div className="d2c-preview-placeholder">{run.status === "FAILED" ? "构建失败，暂时无法预览。" : "等待构建并启动预览。"}</div> : <><div className="d2c-file-tabs">{files.map((file, index) => <button type="button" key={file.path} className={selectedFile === index ? "active" : ""} onClick={() => setSelectedFile(index)}>{file.path}</button>)}</div><pre className="d2c-code"><code>{files[selectedFile]?.content}</code></pre></>}{run.result?.checks?.map((check) => <div className="d2c-check" key={check.id}><strong>{checkStatusText[check.status] || check.status}</strong> {check.message}</div>)}{run.result?.build_details && <details><summary>构建详情</summary><pre className="d2c-code">{run.result.build_details}</pre></details>}{["READY_FOR_REVIEW", "FAILED"].includes(run.status) && run.repairs < 1 && run.model_requests < 2 && <div className="d2c-repair"><label htmlFor="d2c-repair">需要修改什么？</label><textarea id="d2c-repair" rows={2} value={repairInstruction} onChange={(event) => setRepairInstruction(event.target.value)} placeholder="例如：将主按钮改为蓝色，保持其他布局。" /><button disabled={busy || !repairInstruction.trim()} onClick={() => void handleRepair()}>修改页面（剩余 1 次）</button></div>}</> : <p className="d2c-help">{statusText[run.status] || "正在处理"}</p>}</div>}
+        {run && <div className="d2c-result-content">{run.error && <div className="d2c-error">{run.error}</div>}<div className="d2c-run-meta">任务 {run.run_id.slice(-8)} <span>模型请求 {run.model_requests} 次</span></div>{files.length > 0 ? <><div className="d2c-result-actions"><button type="button" className={view === "preview" ? "active" : ""} onClick={() => setView("preview")}>页面预览</button><button type="button" className={view === "code" ? "active" : ""} onClick={() => setView("code")}>查看源码</button>{["READY_FOR_REVIEW", "COMPLETE_LOCAL", "FAILED"].includes(run.status) && <a href={`${api}/runs/${run.run_id}/export`}>下载工程</a>}</div>{view === "preview" ? preview ? <><iframe ref={previewRef} title="生成页面预览" className="d2c-preview" sandbox="allow-scripts allow-forms" src={preview} onLoad={() => { setPreviewReady(true); setSelecting(false); setSelectedElement(null); selectionToken.current = ""; }} />{run.status === "READY_FOR_REVIEW" && run.repairs < 1 && run.model_requests < 2 && <div><button type="button" disabled={!previewReady} onClick={toggleSelection}>{selecting ? "取消选取" : "在预览中选取元素"}</button>{selecting && <span> 请点击预览中的元素</span>}{selectedElement && <p>已选：{selectedElement.label || "页面元素"} <button type="button" onClick={() => setSelectedElement(null)}>清除</button></p>}</div>}</> : <div className="d2c-preview-placeholder">{run.status === "FAILED" ? "构建失败，暂时无法预览。" : "等待构建并启动预览。"}</div> : <><div className="d2c-file-tabs">{files.map((file, index) => <button type="button" key={file.path} className={selectedFile === index ? "active" : ""} onClick={() => setSelectedFile(index)}>{file.path}</button>)}</div><pre className="d2c-code"><code>{files[selectedFile]?.content}</code></pre></>}{["READY_FOR_REVIEW", "COMPLETE_LOCAL"].includes(run.status) && <VisualReview runId={run.run_id} candidate={run.result?.candidate_name} />}{run.result?.checks?.map((check) => <div className="d2c-check" key={check.id}><strong>{checkStatusText[check.status] || check.status}</strong> {check.message}</div>)}{run.result?.build_details && <details><summary>构建详情</summary><pre className="d2c-code">{run.result.build_details}</pre></details>}{["READY_FOR_REVIEW", "FAILED"].includes(run.status) && run.repairs < 1 && run.model_requests < 2 && <div className="d2c-repair"><label htmlFor="d2c-repair">需要修改什么？</label><textarea id="d2c-repair" rows={2} value={repairInstruction} onChange={(event) => setRepairInstruction(event.target.value)} placeholder="例如：将主按钮改为蓝色，保持其他布局。" /><button disabled={busy || !repairInstruction.trim()} onClick={() => void handleRepair()}>修改页面（剩余 1 次）</button></div>}</> : <p className="d2c-help">{statusText[run.status] || "正在处理"}</p>}</div>}
       </section></div><footer className="d2c-footer">DESIGN2CODE <span>设计资料保存在本机 · 模型生成通过已配置的服务执行</span></footer></main>
   </div>;
 }

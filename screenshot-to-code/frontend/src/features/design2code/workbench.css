@@ -76,3 +76,10 @@
 @media (max-width: 850px) { .d2c-grid { grid-template-columns: 1fr; } .d2c-result { min-height: 480px; } .d2c-main { padding-top: 32px; } }
 @media (max-width: 520px) { .d2c-header { padding: 0 16px; } .d2c-header-right { font-size: 0; } .d2c-local { font-size: 11px; } .d2c-main { padding: 30px 14px 16px; } .d2c-intro-note { display: none; } .d2c-inputs, .d2c-result { padding: 19px; } .d2c-footer span { display: none; } }
 @media (prefers-reduced-motion: reduce) { .d2c-spin { animation: none; } }
+.d2c-visual-review { margin: 16px 0; }
+.d2c-visual-controls { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
+.d2c-visual-controls label { display: grid; gap: 4px; }
+.d2c-visual-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.d2c-visual-grid > div { min-width: 0; overflow: auto; max-height: 600px; border: 1px solid #dce2e9; padding: 8px; }
+.d2c-visual-grid img { display: block; width: 100%; height: auto; margin-top: 8px; }
+@media (max-width: 700px) { .d2c-visual-grid { grid-template-columns: 1fr; } }
