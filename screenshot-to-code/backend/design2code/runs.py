@@ -46,7 +46,7 @@ def cancel_run(run_id: str) -> dict[str, Any]:
     with connect() as db:
         db.execute("BEGIN IMMEDIATE")
         row = db.execute("SELECT status FROM runs WHERE id=?", (run_id,)).fetchone()
-        if row is None:
+        if row is None or row["status"] == "DELETED":
             raise HTTPException(404, "找不到该任务。")
         if row["status"] not in {"CREATED", "GENERATING", "REPAIRING", "BUILDING"}:
             raise HTTPException(409, "任务已结束。")
@@ -234,6 +234,9 @@ def request_repair(run_id: str, instruction: str, key: str) -> bool:
         if existing:
             if existing["run_id"] != run_id or existing["request_hash"] != request_hash:
                 raise HTTPException(409, "幂等键已用于其他修复请求。")
+            deleted = db.execute("SELECT status FROM runs WHERE id = ?", (run_id,)).fetchone()
+            if deleted is None or deleted["status"] == "DELETED":
+                raise HTTPException(404, "找不到该任务。")
             return False
         _ensure_model_available(settings)
         row = db.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()

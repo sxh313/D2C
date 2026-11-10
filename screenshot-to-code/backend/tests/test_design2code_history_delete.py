@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+import hashlib
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -16,6 +17,8 @@ def test_delete_history_is_atomic_and_retains_files(tmp_path: Path, monkeypatch:
         for run_id, status in ((finished, "READY_FOR_REVIEW"), (active, "BUILDING")):
             db.execute("INSERT INTO runs (id,set_id,revision,source_hash,idempotency_key,request_hash,status,result_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)", (run_id, "set", 1, "hash", run_id, "hash", status, '{"files":[]}', storage.now(), storage.now()))
         db.execute("INSERT INTO run_events VALUES (?,?,?,?,?)", (finished, 1, "CREATED", "{}", storage.now()))
+        repair_hash = hashlib.sha256(storage.json_encode({"run_id": finished, "instruction": "调整页面"}).encode()).hexdigest()
+        db.execute("INSERT INTO repair_requests VALUES (?,?,?,?)", ("repair-key", finished, repair_hash, storage.now()))
     artifact = tmp_path / "runs" / finished / "example.txt"
     artifact.parent.mkdir(parents=True)
     artifact.write_text("preserved")
@@ -26,6 +29,8 @@ def test_delete_history_is_atomic_and_retains_files(tmp_path: Path, monkeypatch:
     assert client.get(f'/api/d2c/v1/runs/{finished}').status_code == 200
     assert client.post('/api/d2c/v1/runs/delete-history', json={'run_ids': [finished]}).status_code == 200
     assert client.get(f'/api/d2c/v1/runs/{finished}').status_code == 404
+    assert client.post(f'/api/d2c/v1/runs/{finished}/cancel').status_code == 404
+    assert client.post(f'/api/d2c/v1/runs/{finished}/repair', headers={'Idempotency-Key': 'repair-key'}, json={'instruction': '调整页面'}).status_code == 404
     assert [item['run_id'] for item in client.get('/api/d2c/v1/runs').json()['runs']] == [active]
     assert artifact.read_text() == 'preserved'
     with storage.connect() as db:
