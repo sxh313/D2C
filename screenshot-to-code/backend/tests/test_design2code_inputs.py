@@ -37,6 +37,20 @@ import design2code.routes as d2c_routes
 import design2code.settings as d2c_settings
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("payload, expected", [({"data": [{}]}, "connected"), ({"data": []}, "no_session"), ({"error": "failed"}, "unavailable")])
+async def test_figma_connection_status(monkeypatch: MonkeyPatch, payload: dict[str, Any], expected: str) -> None:
+    monkeypatch.setattr(d2c_routes, "get_settings", lambda: SimpleNamespace(figma_mode="mcp"))
+    class FakeClient:
+        def __init__(self, **_kwargs: Any) -> None: pass
+        async def __aenter__(self) -> "FakeClient": return self
+        async def __aexit__(self, *_args: Any) -> None: pass
+        async def post(self, *_args: Any, **_kwargs: Any) -> Any:
+            return SimpleNamespace(raise_for_status=lambda: None, json=lambda: payload)
+    monkeypatch.setattr(d2c_routes.httpx, "AsyncClient", FakeClient)
+    assert (await d2c_routes.figma_connection())["status"] == expected
+
+
 def test_recent_runs_returns_bounded_metadata_only(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
     with storage.connect() as db:

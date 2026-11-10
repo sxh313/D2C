@@ -144,6 +144,8 @@ export default function D2CWorkbench() {
   const [images, setImages] = useState<ImageInput[]>([]);
   const [spec, setSpec] = useState("");
   const [figma, setFigma] = useState("");
+  const [figmaConnection, setFigmaConnection] = useState("");
+  const [figmaChecking, setFigmaChecking] = useState(false);
   const [bundle, setBundle] = useState<ImageInput | null>(null);
   const [instruction, setInstruction] = useState("");
   const [authority, setAuthority] = useState<Record<Dimension, string>>({ layout: "", style: "", content: "", behavior: "" });
@@ -244,6 +246,17 @@ export default function D2CWorkbench() {
       setConnectionError("无法连接后端，请确认工作台服务已启动后重新检查。");
     }
   }, []);
+  async function checkFigmaConnection() {
+    setFigmaChecking(true); setFigmaConnection("");
+    try {
+      const info = await request<{ status: string; sessions: number }>("/figma/connection");
+      if (info.status === "connected") setFigmaConnection(`检测到 ${info.sessions} 个 Figma 插件会话。请确认目标文件已正确关联。`);
+      else if (info.status === "no_session") setFigmaConnection("Bridge 已启动，但未检测到插件会话。请在 Figma Desktop 中运行插件。");
+      else if (info.status === "not_mcp") setFigmaConnection("当前不是 MCP 模式，请检查根目录 .env 配置。");
+      else setFigmaConnection("无法连接 Bridge，请重新启动工作台。");
+    } catch { setFigmaConnection("无法连接工作台后端，请先启动服务。"); }
+    finally { setFigmaChecking(false); }
+  }
   useEffect(() => {
     void refreshCapabilities();
     void restoreLastRun();
@@ -418,6 +431,7 @@ export default function D2CWorkbench() {
         {images.length > 0 && <div className="d2c-thumbnails">{images.map((image, index) => <div className="d2c-thumb" key={`${image.name}-${index}`}><img src={image.data} alt={image.name} /><button type="button" aria-label={`移除 ${image.name}`} onClick={() => setImages((old) => old.filter((_, i) => i !== index))}><LuX /></button></div>)}</div>}
         <label className="d2c-label" htmlFor="d2c-spec">需求 Spec <span>文字或 Markdown</span></label><textarea id="d2c-spec" value={spec} onChange={(event) => setSpec(event.target.value)} placeholder={'例如：任务列表支持搜索、状态筛选和新建弹窗。'} rows={4} />
         <label className="d2c-label" htmlFor="d2c-figma">Figma 节点链接 <span>{!capabilities ? "正在检查配置" : capabilities.figma_mode === "mcp" ? (capabilities.figma_configured ? "MCP 模式；请在 Figma 中运行插件" : "请先安装 MCP Bridge") : (capabilities.figma_configured ? "REST 令牌已配置" : "需要配置访问令牌")}</span></label><input id="d2c-figma" value={figma} onChange={(event) => setFigma(event.target.value)} placeholder="https://www.figma.com/design/…?node-id=…" />
+        {capabilities?.figma_mode === "mcp" && <div className="d2c-help"><button type="button" disabled={figmaChecking} onClick={() => void checkFigmaConnection()}>{figmaChecking ? "正在检查…" : "检查 Figma 插件连接"}</button>{figmaConnection && <p role="status">{figmaConnection}</p>}</div>}
         <label className="d2c-label" htmlFor="d2c-bundle">FigmaToCode 项目包 <span>可选 ZIP，最多 10 MiB</span></label>
         <input id="d2c-bundle" type="file" accept=".zip,application/zip" onChange={(event) => {
           const file = event.target.files?.[0];

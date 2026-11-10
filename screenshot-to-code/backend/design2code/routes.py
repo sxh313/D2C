@@ -9,6 +9,7 @@ import shutil
 import zipfile
 from typing import Any, Literal
 
+import httpx
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -22,6 +23,26 @@ from design2code.settings import get_settings
 from design2code.storage import connect, get_input, get_source_set, identifier, json_encode, now
 
 router = APIRouter(prefix="/api/d2c/v1")
+
+
+@router.get("/figma/connection")
+async def figma_connection() -> dict[str, Any]:
+    """Check plugin presence only; never infer target-file ownership from it."""
+    if get_settings().figma_mode != "mcp":
+        return {"status": "not_mcp", "sessions": 0}
+    try:
+        async with httpx.AsyncClient(timeout=3, trust_env=False) as client:
+            response = await client.post("http://127.0.0.1:1994/rpc", json={"tool": "list_files"})
+            response.raise_for_status()
+            data = response.json()
+        if (not isinstance(data, dict) or data.get("error")
+                or not isinstance(data.get("data"), list)
+                or not all(isinstance(session, dict) for session in data["data"])):
+            return {"status": "unavailable", "sessions": 0}
+        count = len(data["data"])
+        return {"status": "connected" if count else "no_session", "sessions": count}
+    except (httpx.HTTPError, ValueError):
+        return {"status": "unavailable", "sessions": 0}
 
 
 @router.get("/capabilities")
