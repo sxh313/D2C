@@ -34,6 +34,50 @@ import design2code.provider as provider
 import design2code.runner as runner
 import design2code.inspection as inspection
 import design2code.routes as d2c_routes
+import design2code.settings as d2c_settings
+
+
+@pytest.mark.parametrize("override", ["D2C_MODEL_REQUEST_LIMIT=3", "D2C_REPAIR_LIMIT=2", "D2C_AUTO_RETRY_LIMIT=1", "D2C_MODEL_REQUEST_LIMIT=-1"])
+def test_unsafe_request_settings_block_model(tmp_path: Path, monkeypatch: MonkeyPatch, override: str) -> None:
+    env = tmp_path / ".env"
+    env.write_text("D2C_PROVIDER=openai\nD2C_API_PROTOCOL=openai_responses\nOPENAI_BASE_URL=https://example.invalid/v1\nOPENAI_API_KEY=test-only\nD2C_MODEL=openai/gpt-6-luna\n" + override + "\n", encoding="utf-8")
+    monkeypatch.setattr(d2c_settings, "ENV_FILE", env)
+    d2c_settings.get_settings.cache_clear()
+    try:
+        settings = d2c_settings.get_settings()
+        assert not settings.model_ready
+        with pytest.raises(HTTPException) as exc:
+            runs._ensure_model_available(settings)
+        assert exc.value.status_code == 422
+    finally:
+        d2c_settings.get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_initial_execution_calls_model_once(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
+    monkeypatch.setattr(runs, "get_settings", lambda: SimpleNamespace(model_request_limit=2))
+    monkeypatch.setattr(runs, "get_source_set", lambda *_args: {})
+    monkeypatch.setattr(runs, "build_candidate", lambda *_args: {"status": "FAIL", "message": "simulated build"})
+    started, release = asyncio.Event(), asyncio.Event()
+    calls = 0
+    async def fake_generate(_settings: Any, _source_set: Any) -> tuple[str, dict[str, Any]]:
+        nonlocal calls
+        calls += 1
+        started.set()
+        await release.wait()
+        return ('{"files":[{"path":"src/App.tsx","content":"app"},{"path":"src/index.css","content":""}]}', {})
+    monkeypatch.setattr(runs, "generate", fake_generate)
+    with storage.connect() as db:
+        db.execute("INSERT INTO runs (id,set_id,revision,source_hash,idempotency_key,request_hash,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                   ("run_initial_claim", "set", 1, "hash", "initial-claim", "hash", "CREATED", storage.now(), storage.now()))
+    first = asyncio.create_task(runs.execute("run_initial_claim"))
+    await started.wait()
+    await asyncio.gather(*(runs.execute("run_initial_claim") for _ in range(3)))
+    release.set()
+    await first
+    result = runs.read_run("run_initial_claim")
+    assert calls == 1 and result is not None and result["model_requests"] == 1
 
 
 def test_pixel_difference_requires_equal_dimensions_and_reports_raw_difference(tmp_path: Path) -> None:
