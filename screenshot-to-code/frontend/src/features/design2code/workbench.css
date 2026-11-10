@@ -411,3 +411,5 @@
 .d2c-main { max-width: none; padding-left: clamp(16px, 1.5vw, 28px); padding-right: clamp(16px, 1.5vw, 28px); }
 .d2c-header { padding-left: clamp(16px, 1.5vw, 28px); padding-right: clamp(16px, 1.5vw, 28px); }
 @media (max-width: 520px) { .d2c-main { padding-left: 12px; padding-right: 12px; } }
+.d2c-clear-draft { margin-top: 16px; padding: 8px 12px; border: 1px solid #d9e3f0; border-radius: 8px; background: #fff; color: #536d89; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.d2c-clear-draft:disabled { opacity: .5; cursor: not-allowed; }

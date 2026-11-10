@@ -302,6 +302,7 @@ export default function D2CWorkbench() {
   const [draftStorageAvailable, setDraftStorageAvailable] = useState(true);
   const draftWrites = useRef<Promise<void>>(Promise.resolve());
   const imagesRef = useRef<ImageInput[]>([]);
+  const bundleReadVersion = useRef(0);
   const pendingPastedFiles = useRef<File[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<HTMLIFrameElement>(null);
@@ -746,7 +747,8 @@ export default function D2CWorkbench() {
           event.target.value = "";
           if (!file) return;
           if (!file.name.toLowerCase().endsWith(".zip") || file.size > 10 * 1024 * 1024) { setError("请选择不超过 10 MiB 的 ZIP 项目包。"); return; }
-          void readFile(file).then((value) => { setBundle(value); setError(""); }).catch(() => setError("项目包读取失败。"));
+          const version = ++bundleReadVersion.current;
+          void readFile(file).then((value) => { if (version === bundleReadVersion.current) { setBundle(value); setError(""); } }).catch(() => { if (version === bundleReadVersion.current) setError("项目包读取失败。"); });
         }} />
         {bundle && <p className="d2c-help">已选择 {bundle.name} <button type="button" onClick={() => setBundle(null)}>移除</button>。源码和图片仅作为参考，包内脚本不会执行。</p>}</details>
         <label className="d2c-label" htmlFor="d2c-instruction">生成指令 <span>说明各份资料的用途</span></label><textarea id="d2c-instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="例如：布局按 Figma，颜色参考截图，交互按需求说明。" rows={3} />
@@ -770,6 +772,14 @@ export default function D2CWorkbench() {
           <p>资料存在冲突时，请在生成指令中写明以哪一份为准。系统不会自动判断所有冲突。</p>
         </div>
         {error && <div className="d2c-error" role="alert">{error}</div>}
+        <button className="d2c-clear-draft" type="button" disabled={!draftReady || imageReads > 0 || isRunning} onClick={() => {
+          if (!window.confirm("清空当前截图、需求说明、Figma 链接、项目包、生成指令和验收设置？本机任务记录不会删除。")) return;
+          bundleReadVersion.current += 1;
+          imagesRef.current = []; setImages([]); setSpec(""); setFigma(""); setBundle(null); setInstruction("");
+          setAuthority({ layout: "", style: "", content: "", behavior: "" });
+          setSearchRule(emptySearchRule); setDialogRule(emptyDialogRule); setTabRule(emptyTabRule);
+          setImageError(""); setError(""); setFigmaConnection("");
+        }}>清空当前资料</button>
         {pendingRun && <div className="d2c-error" role="status"><strong>有一项任务的创建结果待确认</strong><p>恢复会使用原来的请求标识；如果请求尚未到达服务端，恢复会创建任务并可能调用模型。</p><button type="button" disabled={busy} onClick={() => void recoverPendingRun()}>恢复任务创建</button> <button type="button" disabled={busy} onClick={discardPendingRun}>放弃恢复</button><p>放弃只清除本机恢复记录，不会停止可能已创建的任务；请先查看最近的本机任务。</p></div>}
         <button className="d2c-generate" disabled={isRunning || !!pendingRun || !!pendingRepair || imageReads > 0 || !capabilities?.generation_available} onClick={() => void handleGenerate()}>{isRunning ? <><LuRefreshCw className="d2c-spin" /> 正在处理</> : <>确认资料并生成 <LuArrowUpRight /></>}</button>
         {run && ["CREATED", "GENERATING", "BUILDING", "REPAIRING"].includes(run.status) && <button type="button" disabled={busy} onClick={() => void handleStop()}>停止当前任务</button>}
