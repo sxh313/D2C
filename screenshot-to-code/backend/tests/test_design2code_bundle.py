@@ -59,6 +59,17 @@ def test_bundle_as_reference_and_asset(tmp_path: Path, monkeypatch: MonkeyPatch,
     assert path in context and "./images/logo.png" in context and images == []
 
 
+def test_bundle_asset_url_encodes_special_characters(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    client = client_for(tmp_path, monkeypatch)
+    payload = bundle([("src/App.tsx", b"export default 1"), ("public/images/a%20b#中文.png", png())])
+    response = client.post("/api/d2c/v1/design-inputs", json={"input_type": "figma_bundle", "content": payload})
+    assert response.status_code == 200
+    source: dict[str, Any] = {"sources": [{"input_id": response.json()["input_id"], "role": "reference", "scope": {}}],
+                              "instructions": "", "authority_by_dimension": {}, "resolutions": []}
+    context, _ = provider._materials(source)
+    assert "./images/a%2520b%23%E4%B8%AD%E6%96%87.png" in context
+
+
 @pytest.mark.parametrize("entries", [
     [("../escape.html", b"x")], [("/absolute.html", b"x")],
     [("src/App.tsx", b"x"), ("SRC/app.tsx", b"y")],

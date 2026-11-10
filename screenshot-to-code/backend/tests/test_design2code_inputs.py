@@ -432,6 +432,9 @@ def test_preview_reuses_port_and_routes_each_candidate(tmp_path: Path, monkeypat
         assert "__d2c_selection.js" in httpx.get(first).text
         assert httpx.get(first + "__d2c_selection.js").status_code == 200
         assert httpx.get(first + "asset.js").text == "first-asset"
+        special = tmp_path / "runs" / "run_first" / "candidate" / "dist" / "a%20b#中文.png"
+        special.write_bytes(b"image-fixture")
+        assert httpx.get(first + "a%2520b%23%E4%B8%AD%E6%96%87.png").content == b"image-fixture"
         assert httpx.get(second + "asset.js").text == "second-asset"
         assert httpx.get(first + "%2e%2e/%2e%2e/secret.txt").status_code == 404
     finally:
