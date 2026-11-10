@@ -185,7 +185,13 @@ async def inspect_interactions(run_id: str, candidate: str) -> dict[str, Any]:
                             acted = True
                         elif tag in {"input", "textarea"}:
                             input_type = await locator.get_attribute("type")
-                            if input_type not in {"checkbox", "radio", "file", "submit", "button", "hidden"}:
+                            if input_type in {"checkbox", "radio"}:
+                                await locator.check(timeout=3000)
+                                acted = True
+                            elif input_type in {"submit", "button", "reset", "image"}:
+                                await locator.click(timeout=3000)
+                                acted = True
+                            elif input_type in {None, "text", "search", "email", "password", "tel", "url"} or tag == "textarea":
                                 await locator.fill("smoke", timeout=3000)
                                 acted = True
                         elif tag == "select":
@@ -197,6 +203,10 @@ async def inspect_interactions(run_id: str, candidate: str) -> dict[str, Any]:
                                     acted = True
                         if acted:
                             exercised += 1
+                        else:
+                            # A visible enabled control we cannot safely exercise is
+                            # incomplete coverage, not evidence of a passing check.
+                            incomplete += 1
                     except Exception:
                         incomplete += 1
                 await page.close()

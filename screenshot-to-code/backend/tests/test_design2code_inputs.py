@@ -754,10 +754,27 @@ async def test_interaction_smoke_without_supported_controls_is_not_run(tmp_path:
     runner.close_previews()
     dist = tmp_path / "runs" / "run_empty" / "candidate" / "dist"
     dist.mkdir(parents=True)
-    (dist / "index.html").write_text("<input type='checkbox'><input type='file'>", encoding="utf-8")
+    (dist / "index.html").write_text("<button>Go</button><input type='file'>", encoding="utf-8")
     try:
         result = await inspection.inspect_interactions("run_empty", "candidate")
         assert result["id"] == "interaction_smoke" and result["status"] == "NOT_RUN", result
+        assert "1 个控件操作未完成" in result["message"]
+    finally:
+        runner.close_previews()
+
+
+@pytest.mark.asyncio
+async def test_interaction_smoke_exercises_checkable_and_submit_inputs(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    settings: Any = SimpleNamespace(runtime_dir=tmp_path, preview_host="127.0.0.1", preview_port_start=0, preview_port_end=0)
+    monkeypatch.setattr(runner, "get_settings", lambda: settings)
+    monkeypatch.setattr(inspection, "get_settings", lambda: settings)
+    runner.close_previews()
+    dist = tmp_path / "runs" / "run_input_types" / "candidate" / "dist"
+    dist.mkdir(parents=True)
+    (dist / "index.html").write_text("<input type='checkbox'><input type='radio'><input type='button' value='Go'>", encoding="utf-8")
+    try:
+        result = await inspection.inspect_interactions("run_input_types", "candidate")
+        assert result["status"] == "PASS" and "3 个控件" in result["message"], result
     finally:
         runner.close_previews()
 
