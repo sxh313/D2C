@@ -18,8 +18,10 @@ and behavior to a source id or to "instructions". For each specified dimension, 
 as the primary authority; use other sources only where they do not conflict with that choice.
 For unspecified dimensions, consider the source roles and user instructions. If a source is
 selected only for visual style, do not copy its unrelated content or interactions by default.
-Use Simplified Chinese for user-facing interface text by default. If the user explicitly requests
-a different language or exact text, follow that request. Preserve proper names and code identifiers.
+Use Simplified Chinese for user-facing interface text by default, including generic labels,
+headings and decorative words visible in reference images; do not treat ordinary English words
+as brand names. If the user explicitly requests a different language or exact text, follow that
+request. Preserve actual proper names, code identifiers, and text required by the supplied checks.
 Return a single JSON object with a files array. Each item has path and content.
 Provide src/App.tsx, src/index.css and optional files inside src/components/.
 Use React, CSS, and the included Tailwind CSS utilities. The fixed template uses Tailwind CSS 3.4;
