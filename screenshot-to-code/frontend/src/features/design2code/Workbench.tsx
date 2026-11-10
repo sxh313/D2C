@@ -811,7 +811,8 @@ export default function D2CWorkbench() {
         }} />
         {bundleReading && <p className="d2c-help" role="status">正在读取项目包…</p>}
         {bundle && <p className="d2c-help">已选择 {bundle.name} <button type="button" onClick={() => { bundleReadVersion.current += 1; setBundleReading(false); setBundle(null); }}>移除</button>。源码和图片仅作为参考，包内脚本不会执行。</p>}</details>
-        <label className="d2c-label" htmlFor="d2c-instruction">生成指令 <span>说明各份资料的用途</span></label><textarea id="d2c-instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="例如：布局按 Figma，颜色参考截图，交互按需求说明。" rows={3} />
+        <label className="d2c-label" htmlFor="d2c-instruction">生成指令 <span>说明各份资料的用途</span></label><textarea id="d2c-instruction" aria-describedby="d2c-language-hint" value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="例如：布局按 Figma，颜色参考截图，交互按需求说明。" rows={3} />
+        <p id="d2c-language-hint" className="d2c-help">生成页面默认使用简体中文；如需保留设计稿原文或使用其他语言，请在指令中说明。</p>
         <details><summary>选择各维度的参考来源（可选）</summary>
           {([ ["layout", "布局"], ["style", "视觉样式"], ["content", "内容"], ["behavior", "交互"] ] as const).map(([dimension, label]) =>
             <label className="d2c-label" key={dimension}>{label}<select value={authority[dimension]} onChange={(event) => setAuthority((previous) => ({ ...previous, [dimension]: event.target.value }))}>
