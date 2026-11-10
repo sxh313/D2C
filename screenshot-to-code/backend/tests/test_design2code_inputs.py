@@ -385,6 +385,32 @@ async def test_visual_diff_uses_only_task_references(tmp_path: Path, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_visual_comparison_selects_previous_built_candidate(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    for name, color in (("candidate", "white"), ("candidate-2", "black")):
+        path = tmp_path / "runs" / "run_test" / name / "inspection-mobile.png"
+        path.parent.mkdir(parents=True)
+        Image.new("RGB", (4, 3), color).save(path)
+    image = io.BytesIO()
+    Image.new("RGB", (4, 3), "white").save(image, format="PNG")
+    previous = {"candidate_name": "candidate", "files": [{"path": "src/App.tsx", "content": "x"}], "checks": [{"id": "build", "status": "PASS"}]}
+    run = {"status": "READY_FOR_REVIEW", "source_set_id": "set", "source_set_revision": 1, "result": {"candidate_name": "candidate-2", "previous_candidate": previous}}
+    monkeypatch.setattr(d2c_routes, "read_run", lambda _id: run)
+    monkeypatch.setattr(d2c_routes, "get_source_set", lambda *_args: {"sources": [{"input_id": "reference"}]})
+    monkeypatch.setattr(d2c_routes, "get_input", lambda _id: {"input_type": "screenshot", "data": {"content_base64": base64.b64encode(image.getvalue()).decode()}})
+    monkeypatch.setattr(d2c_routes, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
+    assert (await d2c_routes.inspection_image("run_test", "mobile", "candidate", "previous")).path.parent.name == "candidate"
+    assert (await d2c_routes.visual_diff("run_test", "reference", "mobile", "candidate", "previous"))["mean_channel_difference"] == 0
+    assert (await d2c_routes.visual_diff("run_test", "reference", "mobile", "candidate-2"))["mean_channel_difference"] == 255
+    with pytest.raises(HTTPException) as mismatch:
+        await d2c_routes.inspection_image("run_test", "mobile", "candidate-2", "previous")
+    assert mismatch.value.status_code == 409
+    previous["checks"][0]["status"] = "FAIL"
+    with pytest.raises(HTTPException) as unavailable:
+        await d2c_routes.visual_diff("run_test", "reference", "mobile", "candidate", "previous")
+    assert unavailable.value.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_visual_diff_reference_viewport_capture(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     image = io.BytesIO()
     Image.new("RGB", (4, 3), "white").save(image, format="PNG")

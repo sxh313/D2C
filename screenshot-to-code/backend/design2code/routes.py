@@ -384,10 +384,12 @@ async def visual_references(run_id: str) -> dict[str, Any]:
 
 
 @router.get("/runs/{run_id}/inspection-image/{viewport}")
-async def inspection_image(run_id: str, viewport: Literal["desktop", "tablet", "mobile"], candidate: Literal["candidate", "candidate-2"] | None = None) -> FileResponse:
+async def inspection_image(run_id: str, viewport: Literal["desktop", "tablet", "mobile"], candidate: Literal["candidate", "candidate-2"] | None = None, version: Literal["current", "previous"] = "current") -> FileResponse:
     run = read_run(run_id)
     if run is None:
         raise HTTPException(404, "找不到该任务。")
+    if version == "previous":
+        run = _previous_built_run(run)
     current = (run["result"] or {}).get("candidate_name", "candidate")
     if current not in {"candidate", "candidate-2"}:
         raise HTTPException(404, "找不到检查截图。")
@@ -421,10 +423,12 @@ def _pixel_difference(reference: bytes, candidate_path: Any) -> dict[str, Any]:
 
 
 @router.get("/runs/{run_id}/visual-diff/{input_id}/{viewport}")
-async def visual_diff(run_id: str, input_id: str, viewport: Literal["desktop", "tablet", "mobile", "reference"], candidate: Literal["candidate", "candidate-2"] | None = None) -> dict[str, Any]:
+async def visual_diff(run_id: str, input_id: str, viewport: Literal["desktop", "tablet", "mobile", "reference"], candidate: Literal["candidate", "candidate-2"] | None = None, version: Literal["current", "previous"] = "current") -> dict[str, Any]:
     run = read_run(run_id)
     if run is None:
         raise HTTPException(404, "找不到该任务。")
+    if version == "previous":
+        run = _previous_built_run(run)
     source_set = get_source_set(run["source_set_id"], run["source_set_revision"])
     if source_set is None or not any(source["input_id"] == input_id for source in source_set["sources"]):
         raise HTTPException(404, "找不到任务参考图。")
