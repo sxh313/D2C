@@ -109,7 +109,7 @@ def import_figma_bundle(encoded: str, name: str) -> dict[str, Any]:
                             if image.format not in {"PNG", "JPEG"} or image.width * image.height > 40_000_000:
                                 raise HTTPException(422, "项目包图片格式或尺寸不受支持。")
                             image.verify()
-                    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+                    except (UnidentifiedImageError, OSError, SyntaxError, Image.DecompressionBombError) as exc:
                         raise HTTPException(422, "项目包图片无法读取。") from exc
                     assets.append({"path": f"images/{output_name}", "content_base64": base64.b64encode(content).decode("ascii")})
                 else:
@@ -145,7 +145,7 @@ def import_image(encoded: str, name: str) -> dict[str, Any]:
             if image_format not in {"PNG", "JPEG"} or width * height > 40_000_000:
                 raise HTTPException(422, "只支持不超过 4000 万像素的 PNG/JPEG 图片。")
             image.verify()
-    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+    except (UnidentifiedImageError, OSError, SyntaxError, Image.DecompressionBombError) as exc:
         raise HTTPException(422, "无法读取图片。") from exc
     return save_input("screenshot", {
         "name": name[:255], "width": width, "height": height,
@@ -204,7 +204,7 @@ async def import_figma(url: str) -> dict[str, Any]:
                     if reference.format != "PNG" or reference.width * reference.height > 40_000_000:
                         raise HTTPException(422, "Figma 节点参考图格式或尺寸不受支持。")
                     reference.verify()
-            except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+            except (UnidentifiedImageError, OSError, SyntaxError, Image.DecompressionBombError) as exc:
                 raise HTTPException(422, "无法读取 Figma 节点参考图。") from exc
     except httpx.HTTPError as exc:
         raise HTTPException(502, "Figma 读取失败，请检查网络。") from exc
@@ -326,7 +326,7 @@ async def import_figma_mcp(url: str) -> dict[str, Any]:
             if reference.format != "PNG" or reference.width * reference.height > 40_000_000:
                 raise HTTPException(422, "Figma MCP 节点参考图格式或尺寸不受支持。")
             reference.verify()
-    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+    except (UnidentifiedImageError, OSError, SyntaxError, Image.DecompressionBombError) as exc:
         raise HTTPException(422, "Figma MCP 节点截图无法读取。") from exc
     data: dict[str, Any] = {"file_key": file_key, "node_id": node_id, "name": str(node_result.get("name", "")),
             "node_data": node_result, "mime_type": "image/png", "content_base64": base64.b64encode(image_raw).decode("ascii"),

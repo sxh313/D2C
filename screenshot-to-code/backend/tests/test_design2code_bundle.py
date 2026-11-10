@@ -81,6 +81,16 @@ def test_invalid_bundle_rejected(tmp_path: Path, monkeypatch: MonkeyPatch, entri
     assert response.status_code == 422
 
 
+def test_corrupt_png_returns_validation_error(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    client = client_for(tmp_path, monkeypatch)
+    data = bytearray(png())
+    data[-5] ^= 1  # Break the IEND checksum while keeping a recognizable PNG.
+    response = client.post("/api/d2c/v1/design-inputs", json={"input_type": "figma_bundle", "content": bundle([("src/App.tsx", b"x"), ("images/broken.png", bytes(data))])})
+    assert response.status_code == 422
+    screenshot = client.post("/api/d2c/v1/design-inputs", json={"input_type": "screenshot", "name": "broken.png", "content": "data:image/png;base64," + base64.b64encode(data).decode()})
+    assert screenshot.status_code == 422
+
+
 def test_bundle_asset_copied_into_candidate(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     client = client_for(tmp_path, monkeypatch)
     response = client.post("/api/d2c/v1/design-inputs", json={"input_type": "figma_bundle", "content": bundle([("src/App.tsx", b"export default 1"), ("public/images/logo.png", png())])})
