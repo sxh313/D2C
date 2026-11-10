@@ -116,6 +116,7 @@ export default function D2CWorkbench() {
   const [authority, setAuthority] = useState<Record<Dimension, string>>({ layout: "", style: "", content: "", behavior: "" });
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [connectionError, setConnectionError] = useState("");
+  const [lastRunError, setLastRunError] = useState("");
   const [pollError, setPollError] = useState("");
   const [run, setRun] = useState<Run | null>(null);
   const [restoreId, setRestoreId] = useState("");
@@ -183,6 +184,17 @@ export default function D2CWorkbench() {
     return () => document.removeEventListener("paste", handlePaste);
   }, [addImages]);
 
+  const restoreLastRun = useCallback(async () => {
+    const lastRun = window.localStorage.getItem("d2c_last_run");
+    if (!lastRun) return;
+    try {
+      const restored = await request<Run>(`/runs/${lastRun}`);
+      setRun((current) => current || restored);
+      setLastRunError("");
+    } catch {
+      setLastRunError("暂时无法恢复上次任务；服务恢复后可点击重新检查服务，或按任务 ID 恢复。");
+    }
+  }, []);
   const refreshCapabilities = useCallback(async () => {
     try {
       setCapabilities(await request<Capabilities>("/capabilities"));
@@ -194,9 +206,8 @@ export default function D2CWorkbench() {
   }, []);
   useEffect(() => {
     void refreshCapabilities();
-    const lastRun = window.localStorage.getItem("d2c_last_run");
-    if (lastRun) request<Run>(`/runs/${lastRun}`).then(setRun).catch(() => setError("暂时无法恢复上次任务，请确认后端运行后刷新。"));
-  }, [refreshCapabilities]);
+    void restoreLastRun();
+  }, [refreshCapabilities, restoreLastRun]);
 
   const pollingRunId = run?.run_id;
   const pollingStatus = run?.status;
@@ -331,6 +342,7 @@ export default function D2CWorkbench() {
     try {
       const restored = await request<Run>(`/runs/${id}`);
       setPreview(""); setSelectedFile(0); setView("preview"); setRun(restored);
+      setLastRunError("");
       window.localStorage.setItem("d2c_last_run", restored.run_id);
     } catch (caught) { setRestoreError(caught instanceof Error ? caught.message : "无法恢复任务。"); }
     finally { setBusy(false); }
@@ -380,9 +392,10 @@ export default function D2CWorkbench() {
           {!!capabilities?.configuration_issues.length && <ul>{capabilities.configuration_issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>}
           {capabilities && (capabilities.token_limit_configured || capabilities.cost_limit_configured) && <p>当前版本不执行预算上限，请将根目录 .env 中的 D2C_TOKEN_LIMIT 和 D2C_COST_LIMIT_MICRO_USD 留空后重启服务。</p>}
           {capabilities && !capabilities.configuration_issues.length && !capabilities.token_limit_configured && !capabilities.cost_limit_configured && <p>请确认 pnpm 已安装，且工程模板的锁文件存在。</p>}
-          <button type="button" onClick={() => void refreshCapabilities()}>重新检查服务</button>
+          <button type="button" onClick={() => { void refreshCapabilities(); void restoreLastRun(); }}>重新检查服务</button>
         </div>}
       </section><section className="d2c-card d2c-result"><div className="d2c-section-heading"><div><span className="d2c-step">OUTPUT</span><h2>生成结果</h2></div><span className="d2c-status"><span className="d2c-dot ready" />{run ? statusText[run.status] || run.status : "等待开始"}</span></div>
+        {lastRunError && <div className="d2c-error" role="status">{lastRunError}</div>}
         {pollError && <div className="d2c-error" role="status">{pollError}</div>}
         <details><summary>按任务 ID 恢复</summary><label className="d2c-label" htmlFor="d2c-restore">完整任务 ID</label><input id="d2c-restore" value={restoreId} onChange={(event) => { setRestoreId(event.target.value); setRestoreError(""); }} placeholder="run_…" aria-invalid={!!restoreError} aria-describedby={restoreError ? "d2c-restore-error" : undefined} /><button type="button" disabled={isRunning || !restoreId.trim()} onClick={() => void handleRestore()}>恢复任务</button>{restoreError && <div id="d2c-restore-error" className="d2c-error" role="alert">{restoreError}</div>}</details>
         {!run && <div className="d2c-empty"><div className="d2c-paper"><LuFileCode /><span>YOUR PAGE</span><i /><i /><i /></div><strong>你的页面会显示在这里</strong><p>先添加资料，再填写本次生成要求。</p><div><LuPlus /> 截图 <LuPlus /> Spec <LuPlus /> Figma</div></div>}
