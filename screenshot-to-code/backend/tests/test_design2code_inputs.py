@@ -66,6 +66,21 @@ async def test_visual_diff_uses_only_task_references(tmp_path: Path, monkeypatch
     assert exc.value.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_visual_diff_reference_viewport_capture(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    image = io.BytesIO()
+    Image.new("RGB", (4, 3), "white").save(image, format="PNG")
+    monkeypatch.setattr(d2c_routes, "read_run", lambda _id: {"status": "READY_FOR_REVIEW", "source_set_id": "set", "source_set_revision": 1, "result": {"candidate_name": "candidate"}})
+    monkeypatch.setattr(d2c_routes, "get_source_set", lambda *_args: {"sources": [{"input_id": "reference"}]})
+    monkeypatch.setattr(d2c_routes, "get_input", lambda _id: {"input_type": "screenshot", "data": {"content_base64": base64.b64encode(image.getvalue()).decode()}})
+    async def capture(_run: str, _candidate: str, width: int, height: int) -> bytes:
+        assert (width, height) == (4, 3)
+        return image.getvalue()
+    monkeypatch.setattr(d2c_routes, "capture_reference_viewport", capture)
+    result = await d2c_routes.visual_diff("run_test", "reference", "reference")
+    assert result["capture"] == "reference_viewport" and result["mean_channel_difference"] == 0
+
+
 def test_main_app_only_exposes_tracked_model_generation() -> None:
     from main import app
     paths = {getattr(route, "path", "") for route in app.routes}

@@ -8,6 +8,23 @@ from design2code.runner import _child_env, preview_url
 from design2code.settings import get_settings
 
 
+async def capture_reference_viewport(run_id: str, candidate: str, width: int, height: int) -> bytes:
+    """Capture only the initial viewport, using the reference image dimensions."""
+    settings = get_settings()
+    url = preview_url(run_id, settings, candidate)
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch(headless=True, env=dict(_child_env()))
+        try:
+            page = await browser.new_page(viewport={"width": width, "height": height}, device_scale_factor=1)
+            await page.route("**/*", lambda route: route.continue_() if route.request.url.startswith(url) else route.abort())
+            response = await page.goto(url, wait_until="load", timeout=15000)
+            if response is None or not response.ok:
+                raise RuntimeError("Preview returned an unsuccessful HTTP response")
+            return await page.screenshot(full_page=False, timeout=15000)
+        finally:
+            await browser.close()
+
+
 async def inspect_candidate(run_id: str, candidate: str) -> dict[str, Any]:
     settings = get_settings()
     try:

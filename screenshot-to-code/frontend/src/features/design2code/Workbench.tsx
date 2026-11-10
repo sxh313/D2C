@@ -103,7 +103,7 @@ function VisualReview({ runId, candidate }: { runId: string; candidate?: string 
     differenceRequest.current?.abort(); setDifference(null); setDifferenceError(""); setDifferenceBusy(false);
     return () => { differenceRequest.current?.abort(); };
   }, [runId, candidate, viewport, selected]);
-  async function comparePixels() {
+  async function comparePixels(mode: "desktop" | "mobile" | "reference") {
     const reference = references[selected];
     if (!reference) return;
     differenceRequest.current?.abort();
@@ -111,7 +111,7 @@ function VisualReview({ runId, candidate }: { runId: string; candidate?: string 
     setDifferenceBusy(true); setDifferenceError(""); setDifference(null);
     try {
       const result = await request<{ width: number; height: number; mean_channel_difference: number; image_data_url: string }>(
-        `/runs/${runId}/visual-diff/${encodeURIComponent(reference.id)}/${viewport}`, { signal: controller.signal });
+        `/runs/${runId}/visual-diff/${encodeURIComponent(reference.id)}/${mode}`, { signal: controller.signal });
       if (!controller.signal.aborted) setDifference(result);
     } catch (caught) {
       if (!controller.signal.aborted) setDifferenceError(caught instanceof Error ? caught.message : "差异图生成失败。");
@@ -131,8 +131,8 @@ function VisualReview({ runId, candidate }: { runId: string; candidate?: string 
     {overlay && references[selected] && !imageError ? <><p className="d2c-help">两张图片按各自宽度等比缩放并从顶部对齐；页面尺寸或滚动长度不同时，重叠差异可能来自缩放，请结合并排视图判断。</p><div className="d2c-overlay"><img src={references[selected].data_url} alt="任务参考图" /><img className="d2c-overlay-result" style={{ opacity: opacity / 100 }} src={`${api}/runs/${runId}/inspection-image/${viewport}?candidate=${encodeURIComponent(candidate || "candidate")}`} alt="叠加的生成页面检查截图" onError={() => setImageError(true)} /></div></> : <div className="d2c-visual-grid"><div><strong>任务参考图</strong>{references[selected] ? <img src={references[selected].data_url} alt="任务参考图" /> : <p>本任务没有截图或 Figma 参考图。</p>}</div>
       <div><strong>构建时页面截图</strong>{imageError ? <p>该视口截图未生成，请检查构建和视口检查结果。</p> : <img src={`${api}/runs/${runId}/inspection-image/${viewport}?candidate=${encodeURIComponent(candidate || "candidate")}`} alt="生成页面检查截图" onError={() => setImageError(true)} />}</div></div>
     }
-    <div className="d2c-pixel-diff"><button type="button" disabled={!references[selected] || imageError || differenceBusy} onClick={() => void comparePixels()}>{differenceBusy ? "正在计算…" : "生成同尺寸像素差异图"}</button>
-      <p className="d2c-help">仅比较像素尺寸完全相同的图片；亮色表示像素差异。字体、抗锯齿和动态内容都会影响结果，不代表视觉还原率或验收通过。</p>
+    <div className="d2c-pixel-diff"><button type="button" disabled={!references[selected] || imageError || differenceBusy} onClick={() => void comparePixels(viewport)}>{differenceBusy ? "正在计算…" : "比较现有截图"}</button>{" "}<button type="button" disabled={!references[selected] || differenceBusy} onClick={() => void comparePixels("reference")}>按参考图尺寸截图并比较</button>
+      <p className="d2c-help">重新截图会以参考图的宽高作为浏览器视口，仅截取页面顶部可见区域；长页面其余部分不在对比范围。图片不得超过 2000×2000 像素或 400 万像素。亮色表示像素差异；字体、抗锯齿和动态内容都会影响结果，不代表视觉还原率或验收通过。</p>
       {differenceError && <p role="alert">{differenceError}</p>}
       {difference && <><p>尺寸 {difference.width} × {difference.height}；RGB 平均通道差 {difference.mean_channel_difference} / 255（越低表示像素越接近）。差异亮度放大 3 倍。</p><img src={difference.image_data_url} alt="像素差异图" /></>}
     </div>

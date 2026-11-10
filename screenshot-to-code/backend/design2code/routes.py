@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from PIL import Image, ImageChops, ImageEnhance, ImageStat, UnidentifiedImageError
 
 from design2code.inputs import import_figma, import_figma_bundle, import_figma_mcp, import_image, import_spec
+from design2code.inspection import capture_reference_viewport
 from design2code.runs import cancel_run, create_run, execute, execute_repair, read_run, request_repair
 from design2code.runner import TEMPLATE, preview_url
 from design2code.settings import get_settings
@@ -257,7 +258,7 @@ def _pixel_difference(reference: bytes, candidate_path: Any) -> dict[str, Any]:
 
 
 @router.get("/runs/{run_id}/visual-diff/{input_id}/{viewport}")
-async def visual_diff(run_id: str, input_id: str, viewport: Literal["desktop", "mobile"]) -> dict[str, Any]:
+async def visual_diff(run_id: str, input_id: str, viewport: Literal["desktop", "mobile", "reference"]) -> dict[str, Any]:
     run = read_run(run_id)
     if run is None:
         raise HTTPException(404, "找不到该任务。")
@@ -270,10 +271,27 @@ async def visual_diff(run_id: str, input_id: str, viewport: Literal["desktop", "
     candidate = (run["result"] or {}).get("candidate_name", "candidate")
     if candidate not in {"candidate", "candidate-2"}:
         raise HTTPException(404, "找不到检查截图。")
+    reference = base64.b64decode(item["data"]["content_base64"])
+    if viewport == "reference":
+        if run["status"] not in {"READY_FOR_REVIEW", "COMPLETE_LOCAL"}:
+            raise HTTPException(409, "构建通过后才能重新截图。")
+        try:
+            with Image.open(io.BytesIO(reference)) as image:
+                width, height = image.size
+            if width > 2000 or height > 2000 or width * height > 4_000_000:
+                raise HTTPException(422, "参考图宽高须各不超过 2000 像素，且不超过 400 万像素。")
+            captured = await capture_reference_viewport(run_id, candidate, width, height)
+            result = await asyncio.to_thread(_pixel_difference, reference, io.BytesIO(captured))
+            result["capture"] = "reference_viewport"
+            return result
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(503, "无法按参考图尺寸截取预览，请检查本地预览和 Chromium。") from exc
     path = get_settings().runtime_dir / "runs" / run_id / candidate / f"inspection-{viewport}.png"
     if not path.is_file():
         raise HTTPException(404, "该视口的检查截图未生成。")
-    return await asyncio.to_thread(_pixel_difference, base64.b64decode(item["data"]["content_base64"]), path)
+    return await asyncio.to_thread(_pixel_difference, reference, path)
 
 
 @router.get("/runs/{run_id}/export")
