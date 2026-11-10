@@ -337,7 +337,7 @@ function renderToolDetails(event: AgentEvent, variantCode?: string) {
           <div className="mt-1 text-sm text-red-700 dark:text-red-200">
             {output?.error}
           </div>
-          {event.input && (
+          {Boolean(event.input) && (
             <div className="mt-2">
               <div className="text-xs uppercase tracking-wide text-red-400">
                 Input
@@ -879,7 +879,7 @@ function renderToolDetails(event: AgentEvent, variantCode?: string) {
 
       {!event.toolName && !hasError && (
         <>
-          {event.input && (
+          {Boolean(event.input) && (
             <div>
               <div className="text-xs uppercase tracking-wide text-gray-400">
                 Input

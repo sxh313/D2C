@@ -11,6 +11,14 @@ const ERROR_MESSAGE =
 
 const CANCEL_MESSAGE = "Code generation cancelled";
 
+type AgentPayload = {
+  models?: string[];
+  name?: string;
+  input?: unknown;
+  output?: unknown;
+  ok?: boolean;
+};
+
 type WebSocketResponse = {
   type:
     | "chunk"
@@ -26,7 +34,7 @@ type WebSocketResponse = {
     | "toolStart"
     | "toolResult";
   value?: string;
-  data?: any;
+  data?: AgentPayload;
   eventId?: string;
   variantIndex: number;
 };
@@ -41,8 +49,8 @@ interface CodeGenerationCallbacks {
   onVariantModels: (models: string[]) => void;
   onThinking: (content: string, variantIndex: number, eventId?: string) => void;
   onAssistant: (content: string, variantIndex: number, eventId?: string) => void;
-  onToolStart: (data: any, variantIndex: number, eventId?: string) => void;
-  onToolResult: (data: any, variantIndex: number, eventId?: string) => void;
+  onToolStart: (data: AgentPayload | undefined, variantIndex: number, eventId?: string) => void;
+  onToolResult: (data: AgentPayload | undefined, variantIndex: number, eventId?: string) => void;
   onCancel: (
     reason: "user_cancelled" | "request_failed" | "connection_error",
     errorMessage?: string
