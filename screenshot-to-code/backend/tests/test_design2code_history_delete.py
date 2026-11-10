@@ -37,3 +37,20 @@ def test_delete_history_is_atomic_and_retains_files(tmp_path: Path, monkeypatch:
         row = db.execute('SELECT status, result_json, idempotency_key FROM runs WHERE id=?', (finished,)).fetchone()
         assert row['status'] == 'DELETED' and row['result_json'] is None and row['idempotency_key'] == finished
         assert db.execute('SELECT 1 FROM run_events WHERE run_id=?', (finished,)).fetchone() is None
+
+
+def test_stopped_history_can_be_deleted_but_unknown_is_retained(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
+    stopped, unknown = "run_" + "c" * 32, "run_" + "d" * 32
+    with storage.connect() as db:
+        for run_id, status in ((stopped, "CANCELLED"), (unknown, "UNKNOWN_EXTERNAL")):
+            db.execute("INSERT INTO runs (id,set_id,revision,source_hash,idempotency_key,request_hash,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                       (run_id, "set", 1, "hash", run_id, "hash", status, storage.now(), storage.now()))
+    app = FastAPI()
+    app.include_router(router)
+    with TestClient(app) as client:
+        assert client.post('/api/d2c/v1/runs/delete-history', json={'run_ids': [stopped, unknown]}).status_code == 409
+        assert client.get(f'/api/d2c/v1/runs/{stopped}').status_code == 200
+        assert client.post('/api/d2c/v1/runs/delete-history', json={'run_ids': [stopped]}).status_code == 200
+        assert client.get(f'/api/d2c/v1/runs/{stopped}').status_code == 404
+        assert client.get(f'/api/d2c/v1/runs/{unknown}').status_code == 200

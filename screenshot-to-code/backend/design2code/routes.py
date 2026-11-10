@@ -234,8 +234,8 @@ async def delete_history(request: DeleteHistoryRequest) -> dict[str, Any]:
         rows = [db.execute("SELECT status FROM runs WHERE id=?", (run_id,)).fetchone() for run_id in ids]
         if any(row is None or row["status"] == "DELETED" for row in rows):
             raise HTTPException(404, "部分任务不存在或已删除，请刷新列表。")
-        if any(row["status"] not in {"READY_FOR_REVIEW", "COMPLETE_LOCAL", "FAILED"} for row in rows if row):
-            raise HTTPException(409, "只能删除已完成或失败的任务；运行中或结果未知的任务请保留。")
+        if any(row["status"] not in {"READY_FOR_REVIEW", "COMPLETE_LOCAL", "FAILED", "CANCELLED"} for row in rows if row):
+            raise HTTPException(409, "只能删除已完成、失败或已停止的任务；运行中或结果未知的任务请保留。")
         for run_id in ids:
             db.execute("UPDATE runs SET status='DELETED', result_json=NULL, error=NULL, updated_at=? WHERE id=?", (now(), run_id))
             db.execute("DELETE FROM run_events WHERE run_id=?", (run_id,))
