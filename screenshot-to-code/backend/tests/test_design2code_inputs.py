@@ -1010,7 +1010,17 @@ def test_confirmed_run_is_idempotent_and_calls_model_once(
     assert client.post("/api/d2c/v1/runs", json=body, headers=headers).status_code == 409
     assert client.post(f"/api/d2c/v1/source-sets/{body['source_set_id']}/confirm", json=body).status_code == 200
     first = client.post("/api/d2c/v1/runs", json=body, headers=headers)
+    # Recovery of an existing request does not depend on current provider configuration.
+    monkeypatch.setattr(runs, "get_settings", lambda: SimpleNamespace(
+        model_ready=False, token_limit=None, cost_limit_micro_usd=None, model_request_limit=2, repair_limit=1,
+    ))
     second = client.post("/api/d2c/v1/runs", json=body, headers=headers)
+    assert client.post("/api/d2c/v1/runs", json=body, headers={"Idempotency-Key": "new-key"}).status_code == 422
+    altered: dict[str, Any] = {**body, "source_set_hash": "a" * 64}
+    assert client.post("/api/d2c/v1/runs", json=altered, headers=headers).status_code == 409
+    monkeypatch.setattr(runs, "get_settings", lambda: SimpleNamespace(
+        model_ready=True, token_limit=None, cost_limit_micro_usd=None, model_request_limit=2, repair_limit=1,
+    ))
     assert first.status_code == second.status_code == 202
     assert first.json()["run_id"] == second.json()["run_id"]
     snapshot = client.get(f"/api/d2c/v1/runs/{first.json()['run_id']}").json()

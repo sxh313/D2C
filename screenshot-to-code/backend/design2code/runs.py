@@ -68,7 +68,6 @@ def _ensure_model_available(settings: Any) -> None:
 
 def create_run(set_id: str, revision: int, source_hash: str, key: str) -> tuple[dict[str, Any], bool]:
     settings = get_settings()
-    _ensure_model_available(settings)
     request_hash = hashlib.sha256(json_encode({"set_id": set_id, "revision": revision, "hash": source_hash}).encode()).hexdigest()
     with connect() as db:
         db.execute("BEGIN IMMEDIATE")
@@ -77,6 +76,7 @@ def create_run(set_id: str, revision: int, source_hash: str, key: str) -> tuple[
             if existing["request_hash"] != request_hash:
                 raise HTTPException(409, "幂等键已用于另一项任务。")
             return {"run_id": existing["id"]}, False
+        _ensure_model_available(settings)
         source_set = get_source_set(set_id, revision)
         if source_set is None or source_set["source_set_hash"] != source_hash:
             raise HTTPException(409, "资料集合不存在或已经变更。")
