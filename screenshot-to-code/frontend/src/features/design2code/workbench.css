@@ -147,3 +147,5 @@
 @media (max-width: 850px) { .d2c-grid { grid-template-columns: 1fr; } .d2c-empty { min-height: 320px; } }
 @media (max-width: 520px) { .d2c-inputs, .d2c-result { padding: 19px; } .d2c-label { flex-wrap: wrap; gap: 4px 10px; } .d2c-preview { min-height: 360px; height: 60vh; } .d2c-result-actions a:last-child { margin-left: 0; } }
 @media (prefers-reduced-motion: reduce) { .d2c-drop { transition: none; } }
+
+.d2c-drop.is-dragging { background: #e2f3f5; border-color: #216780; box-shadow: 0 0 0 3px #80bccb55; }

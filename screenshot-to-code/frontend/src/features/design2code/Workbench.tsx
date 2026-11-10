@@ -170,6 +170,9 @@ export default function D2CWorkbench() {
   const [selecting, setSelecting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [imageError, setImageError] = useState("");
+  const [imageReads, setImageReads] = useState(0);
+  const [draggingImage, setDraggingImage] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
   const [draftError, setDraftError] = useState("");
   const [draftStorageAvailable, setDraftStorageAvailable] = useState(true);
@@ -206,16 +209,19 @@ export default function D2CWorkbench() {
   }, [draftReady, draftStorageAvailable, images, spec, figma, bundle, instruction, authority]);
 
   const addImages = useCallback(async (files: File[]) => {
-    setError("");
+    if (!files.length) return;
+    setImageError("");
+    setImageReads((count) => count + 1);
     const valid = files.filter((file) => ["image/png", "image/jpeg"].includes(file.type) && file.size <= 10 * 1024 * 1024);
-    if (valid.length !== files.length) setError("请选择不超过 10 MiB 的 PNG 或 JPEG 图片。");
+    if (valid.length !== files.length) setImageError("请选择不超过 10 MiB 的 PNG 或 JPEG 图片。");
     try {
       const incoming = await Promise.all(valid.map(readFile));
       const combined = [...imagesRef.current, ...incoming];
       imagesRef.current = combined.slice(0, 3);
       setImages(imagesRef.current);
-      if (combined.length > 3) setError("一个页面最多添加 3 张截图。");
-    } catch { setError("无法读取图片，请重新选择。"); }
+      if (combined.length > 3) setImageError("一个页面最多添加 3 张截图。");
+    } catch { setImageError("无法读取图片，请重新选择。"); }
+    finally { setImageReads((count) => count - 1); }
   }, []);
 
   useEffect(() => {
@@ -227,6 +233,22 @@ export default function D2CWorkbench() {
     document.addEventListener("paste", handlePaste);
     return () => document.removeEventListener("paste", handlePaste);
   }, [addImages]);
+
+  useEffect(() => {
+    // Avoid navigating away and losing the current task when a file misses the drop zone.
+    const preventFileNavigation = (event: DragEvent) => {
+      if (Array.from(event.dataTransfer?.types || []).includes("Files")) event.preventDefault();
+    };
+    const clearDrag = () => setDraggingImage(false);
+    window.addEventListener("dragover", preventFileNavigation);
+    window.addEventListener("drop", preventFileNavigation);
+    window.addEventListener("drop", clearDrag);
+    return () => {
+      window.removeEventListener("dragover", preventFileNavigation);
+      window.removeEventListener("drop", preventFileNavigation);
+      window.removeEventListener("drop", clearDrag);
+    };
+  }, []);
 
   const restoreLastRun = useCallback(async () => {
     let lastRun: string | null;
@@ -429,10 +451,12 @@ export default function D2CWorkbench() {
       <div className="d2c-grid"><section className="d2c-card d2c-inputs">{draftError && <div className="d2c-error" role="alert">{draftError}</div>}<div className="d2c-section-heading"><div><span className="d2c-step">第一步 · 准备资料</span><h2>设计资料</h2></div><span className="d2c-count">{images.length + Number(!!spec.trim()) + Number(!!figma.trim()) + Number(!!bundle)} 份资料</span></div>
         <p className="d2c-input-guide">添加至少一种资料；可组合截图、Spec、Figma 和项目包。</p>
         <label className="d2c-label">截图 <span>可添加 3 张</span></label>
-        <div className="d2c-drop" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); void addImages(Array.from(event.dataTransfer.files)); }}>
+        <div className={`d2c-drop ${draggingImage ? "is-dragging" : ""}`} onDragOver={(event) => { event.preventDefault(); if (Array.from(event.dataTransfer.types).includes("Files")) setDraggingImage(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDraggingImage(false); }} onDrop={(event) => { event.preventDefault(); setDraggingImage(false); void addImages(Array.from(event.dataTransfer.files)); }}>
           <input ref={fileRef} type="file" accept="image/png,image/jpeg" multiple hidden onChange={(event) => { void addImages(Array.from(event.target.files || [])); event.target.value = ""; }} />
           <div className="d2c-drop-icon"><LuImagePlus /></div><strong>拖入截图，或 <button type="button" onClick={() => fileRef.current?.click()}>选择图片</button></strong><span><LuClipboardPaste /> 也可以直接 Ctrl + V 粘贴</span>
         </div>
+        {imageReads > 0 && <p className="d2c-help" role="status">正在读取截图…</p>}
+        {imageError && <div className="d2c-error" role="alert">{imageError}</div>}
         {images.length > 0 && <div className="d2c-thumbnails">{images.map((image, index) => <div className="d2c-thumb" key={`${image.name}-${index}`}><img src={image.data} alt={image.name} /><button type="button" aria-label={`移除 ${image.name}`} onClick={() => { imagesRef.current = imagesRef.current.filter((_, i) => i !== index); setImages(imagesRef.current); }}><LuX /></button></div>)}</div>}
         <label className="d2c-label" htmlFor="d2c-spec">需求 Spec <span>文字或 Markdown</span></label><textarea id="d2c-spec" value={spec} onChange={(event) => setSpec(event.target.value)} placeholder={'例如：任务列表支持搜索、状态筛选和新建弹窗。'} rows={4} />
         <label className="d2c-label" htmlFor="d2c-figma">Figma 节点链接 <span>{!capabilities ? "正在检查配置" : capabilities.figma_mode === "mcp" ? (capabilities.figma_configured ? "MCP 模式；请在 Figma 中运行插件" : "请先安装 MCP Bridge") : (capabilities.figma_configured ? "REST 令牌已配置" : "需要配置访问令牌")}</span></label><input id="d2c-figma" value={figma} onChange={(event) => setFigma(event.target.value)} placeholder="https://www.figma.com/design/…?node-id=…" />
@@ -459,7 +483,7 @@ export default function D2CWorkbench() {
           <p>资料存在冲突时，请在生成指令中写明以哪一份为准。系统不会自动判断所有冲突。</p>
         </div>
         {error && <div className="d2c-error" role="alert">{error}</div>}
-        <button className="d2c-generate" disabled={isRunning || !capabilities?.generation_available} onClick={() => void handleGenerate()}>{isRunning ? <><LuRefreshCw className="d2c-spin" /> 正在处理</> : <>确认资料并生成 <LuArrowUpRight /></>}</button>
+        <button className="d2c-generate" disabled={isRunning || imageReads > 0 || !capabilities?.generation_available} onClick={() => void handleGenerate()}>{isRunning ? <><LuRefreshCw className="d2c-spin" /> 正在处理</> : <>确认资料并生成 <LuArrowUpRight /></>}</button>
         {run && ["CREATED", "GENERATING", "BUILDING", "REPAIRING"].includes(run.status) && <button type="button" disabled={busy} onClick={() => void handleStop()}>停止当前任务</button>}
         {!capabilities?.generation_available && <div className="d2c-help" role="status">
           <p>{connectionError || (!capabilities ? "正在检查本机服务…" : "生成暂不可用，请检查以下配置和依赖。")}</p>
