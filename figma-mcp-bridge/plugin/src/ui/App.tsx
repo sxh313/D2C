@@ -111,6 +111,9 @@ export default function App() {
     // The main thread reads the persisted state asynchronously, so ask for it
     // on mount rather than relying on a broadcast we may have missed.
     parent.postMessage({ pluginMessage: { type: "request-ui-state" } }, "*");
+    // Request file status after the listener is ready; the initial broadcast may
+    // arrive before this iframe mounts, and the socket needs fileKey to start.
+    parent.postMessage({ pluginMessage: { type: "ui-ready" } }, "*");
     return () => {
       window.removeEventListener("message", handleMessage);
     };
