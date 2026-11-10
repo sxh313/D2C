@@ -12,6 +12,7 @@ import subprocess
 import sys
 import threading
 import time
+import zipfile
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -76,6 +77,34 @@ def test_recent_runs_returns_bounded_metadata_only(tmp_path: Path, monkeypatch: 
     assert len(result.json()["runs"]) == 1 and result.json()["runs"][0]["run_id"] == "run_1"
     assert "not listed" not in result.text
     assert client.get("/api/d2c/v1/runs?limit=101").status_code == 422
+
+
+@pytest.mark.parametrize("status", ["FAILED", "UNKNOWN_EXTERNAL", "CANCELLED"])
+def test_interrupted_repair_keeps_built_candidate_accessible(status: str, tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    candidate = tmp_path / "runs" / "run_test" / "candidate"
+    candidate.mkdir(parents=True)
+    (candidate / "package.json").write_text("{}", encoding="utf-8")
+    run = {"status": status, "result": {"candidate_name": "candidate", "files": [{"path": "src/App.tsx", "content": "app"}],
+                                       "checks": [{"id": "build", "status": "PASS"}]},
+           "source_set_id": "set", "source_set_revision": 1, "source_set_hash": "hash",
+           "model_requests": 2, "error": "修改中断"}
+    monkeypatch.setattr(d2c_routes, "read_run", lambda _id: run)
+    monkeypatch.setattr(d2c_routes, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
+    monkeypatch.setattr(d2c_routes, "get_source_set", lambda *_args: {"sources": []})
+    monkeypatch.setattr(d2c_routes, "preview_url", lambda *_args: "/previous/")
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+    assert client.get("/api/d2c/v1/runs/run_test/preview").json() == {"url": "/previous/"}
+    exported = client.get("/api/d2c/v1/runs/run_test/export")
+    assert exported.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(exported.content)) as archive:
+        report = json.loads(archive.read("design2code-page/report.json"))
+        assert report["status"] == status and report["error"] == "修改中断"
+    run["result"]["checks"][0]["status"] = "FAIL"
+    assert client.get("/api/d2c/v1/runs/run_test/preview").status_code == 409
+    if status != "FAILED":
+        assert client.get("/api/d2c/v1/runs/run_test/export").status_code == 409
 
 
 @pytest.mark.parametrize("override", ["D2C_MODEL_REQUEST_LIMIT=3", "D2C_REPAIR_LIMIT=2", "D2C_AUTO_RETRY_LIMIT=1", "D2C_MODEL_REQUEST_LIMIT=-1"])

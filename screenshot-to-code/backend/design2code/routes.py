@@ -221,12 +221,27 @@ async def get_run_events(run_id: str, after_seq: int = 0) -> dict[str, Any]:
                          "created_at": row["created_at"]} for row in rows]}
 
 
+def _has_built_candidate(run: dict[str, Any]) -> bool:
+    result: dict[str, Any] = run.get("result") or {}
+    checks: list[dict[str, Any]] = result.get("checks", [])
+    return bool(result.get("files")) and any(
+        check.get("id") == "build" and check.get("status") == "PASS"
+        for check in checks
+    )
+
+
+def _can_preview(run: dict[str, Any]) -> bool:
+    return run["status"] in {"READY_FOR_REVIEW", "COMPLETE_LOCAL"} or (
+        run["status"] in {"FAILED", "UNKNOWN_EXTERNAL", "CANCELLED"} and _has_built_candidate(run)
+    )
+
+
 @router.get("/runs/{run_id}/preview")
 async def get_preview(run_id: str) -> dict[str, str]:
     run = read_run(run_id)
     if run is None:
         raise HTTPException(404, "找不到该任务。")
-    if run["status"] not in {"READY_FOR_REVIEW", "COMPLETE_LOCAL"}:
+    if not _can_preview(run):
         raise HTTPException(409, "构建通过后才能预览。")
     try:
         return {"url": preview_url(run_id, get_settings(), (run["result"] or {}).get("candidate_name", "candidate"))}
@@ -303,7 +318,7 @@ async def visual_diff(run_id: str, input_id: str, viewport: Literal["desktop", "
         raise HTTPException(404, "找不到检查截图。")
     reference = base64.b64decode(item["data"]["content_base64"])
     if viewport == "reference":
-        if run["status"] not in {"READY_FOR_REVIEW", "COMPLETE_LOCAL"}:
+        if not _can_preview(run):
             raise HTTPException(409, "构建通过后才能重新截图。")
         try:
             with Image.open(io.BytesIO(reference)) as image:
@@ -331,7 +346,9 @@ async def export_run(run_id: str) -> StreamingResponse:
     run = read_run(run_id)
     if run is None:
         raise HTTPException(404, "找不到该任务。")
-    if run["status"] not in {"READY_FOR_REVIEW", "COMPLETE_LOCAL", "FAILED"}:
+    if run["status"] not in {"READY_FOR_REVIEW", "COMPLETE_LOCAL", "FAILED"} and not (
+        run["status"] in {"UNKNOWN_EXTERNAL", "CANCELLED"} and _has_built_candidate(run)
+    ):
         raise HTTPException(409, "任务结束后才能导出。")
     candidate_name: str = str((run["result"] or {}).get("candidate_name", "candidate"))
     if candidate_name not in {"candidate", "candidate-2"}:
