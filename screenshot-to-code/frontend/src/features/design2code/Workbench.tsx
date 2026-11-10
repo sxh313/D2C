@@ -736,9 +736,10 @@ export default function D2CWorkbench() {
     <main className="d2c-main"><div className="d2c-intro"><div><div className="d2c-eyebrow">设计资料 → 可运行页面</div><h1>把设计，变成可以运行的页面。</h1><p>添加设计资料，生成可以预览和导出的前端页面。</p></div><div className="d2c-intro-note"><span>输出</span><strong>React + TypeScript</strong></div></div>
       <div className="d2c-grid"><section className="d2c-card d2c-inputs">{draftError && <div className="d2c-error" role="alert">{draftError}</div>}<div className="d2c-section-heading"><div><span className="d2c-step">第一步 · 准备资料</span><h2>设计资料</h2></div><span className="d2c-count">{images.length + Number(!!spec.trim()) + Number(!!figma.trim()) + Number(!!bundle)} 份资料</span></div>
         <p className="d2c-input-guide">添加至少一种资料；可组合截图、需求说明、Figma 和项目包。</p>
-        <p className="d2c-draft-status" role="status">{draftError ? "草稿未保存" : imageReads > 0 ? "图片读取中" : draftSaveState === "saving" ? "草稿保存中…" : "草稿已保存到当前浏览器"}</p>
+        <p className="d2c-draft-status" role="status">{!draftReady ? "正在读取本机草稿…" : draftError ? "草稿未保存" : imageReads > 0 ? "图片读取中" : draftSaveState === "saving" ? "草稿保存中…" : "草稿已保存到当前浏览器"}</p>
+        <fieldset className="d2c-material-fields" disabled={!draftReady} aria-busy={!draftReady}>
         <label className="d2c-label">截图 <span>已添加 {images.length} / 3 张</span></label>
-        <div className={`d2c-drop ${draggingImage ? "is-dragging" : ""}`} onDragOver={(event) => { event.preventDefault(); if (Array.from(event.dataTransfer.types).includes("Files")) setDraggingImage(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDraggingImage(false); }} onDrop={(event) => { event.preventDefault(); setDraggingImage(false); void addImages(Array.from(event.dataTransfer.files)); }}>
+        <div className={`d2c-drop ${draggingImage ? "is-dragging" : ""}`} onDragOver={(event) => { event.preventDefault(); if (draftReady && Array.from(event.dataTransfer.types).includes("Files")) setDraggingImage(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDraggingImage(false); }} onDrop={(event) => { event.preventDefault(); setDraggingImage(false); if (draftReady) void addImages(Array.from(event.dataTransfer.files)); }}>
           <input ref={fileRef} type="file" accept="image/png,image/jpeg" multiple hidden onChange={(event) => { void addImages(Array.from(event.target.files || [])); event.target.value = ""; }} />
           <div className="d2c-drop-icon"><LuImagePlus /></div><strong>拖入截图，或 <button type="button" onClick={() => fileRef.current?.click()}>选择图片</button></strong><span><LuClipboardPaste /> 也可以直接 Ctrl + V 粘贴</span>
         </div>
@@ -813,6 +814,7 @@ export default function D2CWorkbench() {
           {capabilities && !capabilities.configuration_issues.length && !capabilities.token_limit_configured && !capabilities.cost_limit_configured && <p>请确认 pnpm 已安装，且工程模板的锁文件存在。</p>}
           <button type="button" onClick={() => { void refreshCapabilities(); void restoreLastRun(); }}>重新检查服务</button>
         </div>}
+        </fieldset>
       </section><section className="d2c-card d2c-result"><div className="d2c-section-heading"><div><span className="d2c-step">第二步 · 查看与修改</span><h2>生成结果</h2></div><span className="d2c-status"><span className={`d2c-dot ${run && ["READY_FOR_REVIEW", "COMPLETE_LOCAL"].includes(run.status) && !failedChecks.length ? "ready" : ""}`} />{run ? statusText[run.status] || run.status : "等待开始"}</span></div>
         {lastRunError && <div className="d2c-error" role="status">{lastRunError}</div>}
         {pollError && <div className="d2c-error" role="status">{pollError}</div>}
