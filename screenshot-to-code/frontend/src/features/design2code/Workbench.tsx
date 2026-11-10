@@ -287,6 +287,7 @@ export default function D2CWorkbench() {
   const fileRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<HTMLIFrameElement>(null);
   const selectionToken = useRef("");
+  const previousPreviewRequest = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -442,12 +443,22 @@ export default function D2CWorkbench() {
   const currentCandidate = run?.result?.candidate_name;
   const previous = run?.result?.previous_candidate;
   const canRecoverPrevious = run?.status === "FAILED" && !!previous?.files?.length && !!previous.checks?.some((check) => check.id === "build" && check.status === "PASS");
-  useEffect(() => { setPreviousPreview(""); setPreviousPreviewError(""); }, [currentRunId, currentCandidate]);
+  useEffect(() => {
+    previousPreviewRequest.current += 1;
+    setPreviousPreview("");
+    setPreviousPreviewError("");
+    return () => { previousPreviewRequest.current += 1; };
+  }, [currentRunId, currentCandidate]);
   async function showPreviousPreview() {
     if (!currentRunId) return;
+    const requestId = ++previousPreviewRequest.current;
     setPreviousPreviewError("");
-    try { setPreviousPreview((await request<{ url: string }>(`/runs/${currentRunId}/preview?version=previous`)).url); }
-    catch (caught) { setPreviousPreviewError(caught instanceof Error ? caught.message : "无法打开修改前预览。"); }
+    try {
+      const result = await request<{ url: string }>(`/runs/${currentRunId}/preview?version=previous`);
+      if (requestId === previousPreviewRequest.current) setPreviousPreview(result.url);
+    } catch (caught) {
+      if (requestId === previousPreviewRequest.current) setPreviousPreviewError(caught instanceof Error ? caught.message : "无法打开修改前预览。");
+    }
   }
   const hasBuiltCandidate = !!run?.result?.files?.length && !!run.result.checks?.some((check) => check.id === "build" && check.status === "PASS");
   const canPreview = !!run && (["READY_FOR_REVIEW", "COMPLETE_LOCAL"].includes(run.status) || (["FAILED", "UNKNOWN_EXTERNAL", "CANCELLED"].includes(run.status) && hasBuiltCandidate));
