@@ -174,6 +174,7 @@ export default function D2CWorkbench() {
   const [draftError, setDraftError] = useState("");
   const [draftStorageAvailable, setDraftStorageAvailable] = useState(true);
   const draftWrites = useRef<Promise<void>>(Promise.resolve());
+  const imagesRef = useRef<ImageInput[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<HTMLIFrameElement>(null);
   const selectionToken = useRef("");
@@ -182,7 +183,8 @@ export default function D2CWorkbench() {
     let active = true;
     readDraft().then((draft) => {
       if (!active || !draft) return;
-      setImages(draft.images || []);
+      imagesRef.current = draft.images || [];
+      setImages(imagesRef.current);
       setSpec(draft.spec || "");
       setFigma(draft.figma || "");
       setBundle(draft.bundle || null);
@@ -209,10 +211,12 @@ export default function D2CWorkbench() {
     if (valid.length !== files.length) setError("请选择不超过 10 MiB 的 PNG 或 JPEG 图片。");
     try {
       const incoming = await Promise.all(valid.map(readFile));
-      setImages((previous) => [...previous, ...incoming].slice(0, 3));
-      if (images.length + incoming.length > 3) setError("一个页面最多添加 3 张截图。");
+      const combined = [...imagesRef.current, ...incoming];
+      imagesRef.current = combined.slice(0, 3);
+      setImages(imagesRef.current);
+      if (combined.length > 3) setError("一个页面最多添加 3 张截图。");
     } catch { setError("无法读取图片，请重新选择。"); }
-  }, [images.length]);
+  }, []);
 
   useEffect(() => {
     const handlePaste = (event: ClipboardEvent) => {
@@ -429,7 +433,7 @@ export default function D2CWorkbench() {
           <input ref={fileRef} type="file" accept="image/png,image/jpeg" multiple hidden onChange={(event) => { void addImages(Array.from(event.target.files || [])); event.target.value = ""; }} />
           <div className="d2c-drop-icon"><LuImagePlus /></div><strong>拖入截图，或 <button type="button" onClick={() => fileRef.current?.click()}>选择图片</button></strong><span><LuClipboardPaste /> 也可以直接 Ctrl + V 粘贴</span>
         </div>
-        {images.length > 0 && <div className="d2c-thumbnails">{images.map((image, index) => <div className="d2c-thumb" key={`${image.name}-${index}`}><img src={image.data} alt={image.name} /><button type="button" aria-label={`移除 ${image.name}`} onClick={() => setImages((old) => old.filter((_, i) => i !== index))}><LuX /></button></div>)}</div>}
+        {images.length > 0 && <div className="d2c-thumbnails">{images.map((image, index) => <div className="d2c-thumb" key={`${image.name}-${index}`}><img src={image.data} alt={image.name} /><button type="button" aria-label={`移除 ${image.name}`} onClick={() => { imagesRef.current = imagesRef.current.filter((_, i) => i !== index); setImages(imagesRef.current); }}><LuX /></button></div>)}</div>}
         <label className="d2c-label" htmlFor="d2c-spec">需求 Spec <span>文字或 Markdown</span></label><textarea id="d2c-spec" value={spec} onChange={(event) => setSpec(event.target.value)} placeholder={'例如：任务列表支持搜索、状态筛选和新建弹窗。'} rows={4} />
         <label className="d2c-label" htmlFor="d2c-figma">Figma 节点链接 <span>{!capabilities ? "正在检查配置" : capabilities.figma_mode === "mcp" ? (capabilities.figma_configured ? "MCP 模式；请在 Figma 中运行插件" : "请先安装 MCP Bridge") : (capabilities.figma_configured ? "REST 令牌已配置" : "需要配置访问令牌")}</span></label><input id="d2c-figma" value={figma} onChange={(event) => setFigma(event.target.value)} placeholder="https://www.figma.com/design/…?node-id=…" />
         {capabilities?.figma_mode === "mcp" && <div className="d2c-help"><button type="button" disabled={figmaChecking} onClick={() => void checkFigmaConnection()}>{figmaChecking ? "正在检查…" : "检查 Figma 插件连接"}</button>{figmaConnection && <p role="status">{figmaConnection}</p>}</div>}
