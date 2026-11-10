@@ -494,8 +494,8 @@ async def export_run(run_id: str, version: Literal["current", "previous"] = "cur
         run["status"] in {"UNKNOWN_EXTERNAL", "CANCELLED"} and _has_built_candidate(run)
     ):
         raise HTTPException(409, "任务结束后才能导出。")
-    if any(check.get("id") == "build" and check.get("status") == "NOT_RUN"
-           for check in (run.get("result") or {}).get("checks", [])):
+    build_check = next((check for check in (run.get("result") or {}).get("checks", []) if check.get("id") == "build"), None)
+    if (build_check and build_check.get("status") == "NOT_RUN") or (run["status"] == "FAILED" and not build_check):
         raise HTTPException(409, "工程构建尚未完成，请使用下载已保存源码。")
     candidate_name: str = str((run["result"] or {}).get("candidate_name", "candidate"))
     if candidate_name not in {"candidate", "candidate-2"}:

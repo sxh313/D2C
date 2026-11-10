@@ -78,10 +78,14 @@ def test_unfinished_build_cannot_export_partial_project(tmp_path: Path, monkeypa
     with storage.connect() as db:
         db.execute("INSERT INTO runs (id,set_id,revision,source_hash,idempotency_key,request_hash,status,result_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
                    ("run_partial", "set", 1, "hash", "partial", "hash", "FAILED", json.dumps(result), storage.now(), storage.now()))
+        db.execute("INSERT INTO runs (id,set_id,revision,source_hash,idempotency_key,request_hash,status,result_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                   ("run_legacy", "set", 1, "hash", "legacy", "hash", "FAILED", json.dumps({"files": result["files"]}), storage.now(), storage.now()))
     with TestClient(app) as client:
         response = client.get("/api/d2c/v1/runs/run_partial/export")
         assert response.status_code == 409 and "下载已保存源码" in response.json()["detail"]
         assert client.get("/api/d2c/v1/runs/run_partial/saved-source").status_code == 200
+        assert client.get("/api/d2c/v1/runs/run_legacy/export").status_code == 409
+        assert client.get("/api/d2c/v1/runs/run_legacy/saved-source").status_code == 200
 
 
 def test_visual_check_only_marks_proven_spec_only_inapplicable(monkeypatch: MonkeyPatch) -> None:
@@ -462,6 +466,40 @@ async def test_failed_build_report_distinguishes_unrun_checks(tmp_path: Path, mo
     assert run is not None and run["status"] == "FAILED"
     checks = {check["id"]: check["status"] for check in run["result"]["checks"]}
     assert checks == {"build": "FAIL", "visual": "NOT_RUN", "interactions": "NOT_RUN", "manual_review": "NOT_RUN", "spec_search_01": "NOT_RUN"}
+
+
+@pytest.mark.asyncio
+async def test_initial_output_survives_restart_during_build(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
+    monkeypatch.setattr(runs, "get_settings", lambda: SimpleNamespace(model_request_limit=2))
+    monkeypatch.setattr(runs, "get_source_set", lambda *_args: {"tab_check": {"tab_name": "x"}})
+    started, release = threading.Event(), threading.Event()
+
+    def blocked_build(*_args: Any) -> dict[str, Any]:
+        started.set()
+        assert release.wait(10)
+        return {"status": "FAIL", "message": "interrupted"}
+
+    async def fake_generate(*_args: Any, **_kwargs: Any) -> tuple[str, dict[str, Any]]:
+        return ('{"files":[{"path":"src/App.tsx","content":"new"},{"path":"src/index.css","content":""}]}', {})
+
+    monkeypatch.setattr(runs, "generate", fake_generate)
+    monkeypatch.setattr(runs, "build_candidate", blocked_build)
+    with storage.connect() as db:
+        db.execute("INSERT INTO runs (id,set_id,revision,source_hash,idempotency_key,request_hash,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                   ("run_initial_interrupted", "set", 1, "hash", "initial-interrupted", "hash", "CREATED", storage.now(), storage.now()))
+    task = asyncio.create_task(runs.execute("run_initial_interrupted"))
+    try:
+        assert await asyncio.to_thread(started.wait, 5)
+        runs.recover_interrupted_runs()
+    finally:
+        release.set()
+        await task
+    run = runs.read_run("run_initial_interrupted")
+    assert run is not None and run["status"] == "FAILED" and run["model_requests"] == 1
+    assert run["result"]["files"][0]["content"] == "new"
+    checks = {item["id"]: item["status"] for item in run["result"]["checks"]}
+    assert checks["build"] == checks["spec_tab_01"] == "NOT_RUN"
 
 
 @pytest.mark.asyncio
