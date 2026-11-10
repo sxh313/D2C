@@ -184,6 +184,10 @@
 .d2c-check-results { background: #f6fafb; }
 .d2c-check { padding: 7px 0; border-top: 1px solid #e2edf0; }
 .d2c-check strong { display: inline-block; min-width: 66px; font-family: inherit; font-size: 11px; }
+.d2c-check strong[data-status="PASS"] { color: #196a58; }
+.d2c-check strong[data-status="FAIL"] { color: #a5322d; }
+.d2c-check strong[data-status="NOT_RUN"] { color: #765710; }
+.d2c-check strong[data-status="MANUAL_REVIEW"] { color: #57478a; }
 .d2c-shell button:not(:disabled):hover, .d2c-shell a:hover { filter: brightness(.95); }
 @media (max-width: 850px) { .d2c-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 520px) {
