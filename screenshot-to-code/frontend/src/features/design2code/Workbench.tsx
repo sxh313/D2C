@@ -7,6 +7,7 @@ type ImageInput = { name: string; data: string };
 type Capabilities = { provider_configured: boolean; figma_mode: "mcp" | "rest"; figma_configured: boolean; generation_available: boolean; configuration_issues: string[]; token_limit_configured: boolean; cost_limit_configured: boolean };
 type SourceSet = { source_set_id: string; source_set_revision: number; source_set_hash: string };
 type Run = { run_id: string; status: string; error: string | null; model_requests: number; repairs: number; result: { candidate_name?: string; files: { path: string; content: string }[]; checks?: { id: string; status: string; message: string }[]; build_details?: string } | null };
+type RecentRun = { run_id: string; status: string; model_requests: number; repairs: number; created_at: string };
 type Dimension = "layout" | "style" | "content" | "behavior";
 type SelectedElement = { html: string; context: string; label: string };
 
@@ -153,6 +154,9 @@ export default function D2CWorkbench() {
   const [run, setRun] = useState<Run | null>(null);
   const [restoreId, setRestoreId] = useState("");
   const [restoreError, setRestoreError] = useState("");
+  const [recentRuns, setRecentRuns] = useState<RecentRun[] | null>(null);
+  const [recentError, setRecentError] = useState("");
+  const [recentBusy, setRecentBusy] = useState(false);
   const [selectedFile, setSelectedFile] = useState(0);
   const [preview, setPreview] = useState("");
   const [previewError, setPreviewError] = useState("");
@@ -375,18 +379,28 @@ export default function D2CWorkbench() {
     finally { setBusy(false); }
   }
 
-  async function handleRestore() {
-    const id = restoreId.trim();
+  async function handleRestore(selectedId?: string) {
+    const id = (selectedId || restoreId).trim();
     if (!/^run_[a-f0-9]{32}$/.test(id)) { setRestoreError("请输入完整的任务 ID，例如 run_ 后跟 32 位字符。"); return; }
-    setBusy(true); setRestoreError("");
+    setBusy(true); setRestoreError(""); setRecentError("");
     try {
       const restored = await request<Run>(`/runs/${id}`);
       setPreview(""); setSelectedFile(0); setView("preview"); setRun(restored);
       setLastRunError("");
       try { window.localStorage.setItem("d2c_last_run", restored.run_id); }
       catch { setLastRunError("浏览器无法保存最近任务记录，请复制当前任务 ID 以便恢复。"); }
-    } catch (caught) { setRestoreError(caught instanceof Error ? caught.message : "无法恢复任务。"); }
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "无法恢复任务。";
+      if (selectedId) setRecentError(message); else setRestoreError(message);
+    }
     finally { setBusy(false); }
+  }
+
+  async function loadRecentRuns() {
+    setRecentBusy(true); setRecentError("");
+    try { setRecentRuns((await request<{ runs: RecentRun[] }>("/runs?limit=20")).runs); }
+    catch { setRecentError("无法读取本机任务列表，请检查后端连接。"); }
+    finally { setRecentBusy(false); }
   }
 
   const isRunning = busy || !!run && ["CREATED", "GENERATING", "BUILDING", "REPAIRING"].includes(run.status);
@@ -438,6 +452,7 @@ export default function D2CWorkbench() {
       </section><section className="d2c-card d2c-result"><div className="d2c-section-heading"><div><span className="d2c-step">OUTPUT</span><h2>生成结果</h2></div><span className="d2c-status"><span className="d2c-dot ready" />{run ? statusText[run.status] || run.status : "等待开始"}</span></div>
         {lastRunError && <div className="d2c-error" role="status">{lastRunError}</div>}
         {pollError && <div className="d2c-error" role="status">{pollError}</div>}
+        <details><summary>最近的本机任务</summary><p className="d2c-help">从本机记录中选择，恢复只读取已有任务，不重新发起模型请求。</p><button type="button" disabled={recentBusy} onClick={() => void loadRecentRuns()}>{recentBusy ? "正在读取…" : "读取最近 20 个任务"}</button>{recentError && <p role="alert">{recentError}</p>}{recentRuns && (recentRuns.length ? <ul>{recentRuns.map((item) => <li key={item.run_id}><button type="button" disabled={isRunning} onClick={() => void handleRestore(item.run_id)}>恢复 {item.run_id}</button> {statusText[item.status] || item.status} · {new Date(item.created_at).toLocaleString()} · 模型请求 {item.model_requests} 次</li>)}</ul> : <p>本机没有任务记录。</p>)}</details>
         <details><summary>按任务 ID 恢复</summary><label className="d2c-label" htmlFor="d2c-restore">完整任务 ID</label><input id="d2c-restore" value={restoreId} onChange={(event) => { setRestoreId(event.target.value); setRestoreError(""); }} placeholder="run_…" aria-invalid={!!restoreError} aria-describedby={restoreError ? "d2c-restore-error" : undefined} /><button type="button" disabled={isRunning || !restoreId.trim()} onClick={() => void handleRestore()}>恢复任务</button>{restoreError && <div id="d2c-restore-error" className="d2c-error" role="alert">{restoreError}</div>}</details>
         {!run && <div className="d2c-empty"><div className="d2c-paper"><LuFileCode /><span>YOUR PAGE</span><i /><i /><i /></div><strong>你的页面会显示在这里</strong><p>先添加资料，再填写本次生成要求。</p><div><LuPlus /> 截图 <LuPlus /> Spec <LuPlus /> Figma</div></div>}
         {run && <div className="d2c-result-content">{run.error && <div className="d2c-error">{run.error}</div>}<div className="d2c-run-meta">任务 {run.run_id} <span>模型请求 {run.model_requests} 次</span></div>{files.length > 0 ? <><div className="d2c-result-actions"><button type="button" className={view === "preview" ? "active" : ""} onClick={() => setView("preview")}>页面预览</button><button type="button" className={view === "code" ? "active" : ""} onClick={() => setView("code")}>查看源码</button>{["READY_FOR_REVIEW", "COMPLETE_LOCAL", "FAILED"].includes(run.status) && <a href={`${api}/runs/${run.run_id}/export`}>下载工程</a>}</div>{view === "preview" ? preview ? <><iframe ref={previewRef} title="生成页面预览" className="d2c-preview" sandbox="allow-scripts allow-forms" src={preview} onLoad={() => { setPreviewReady(true); setSelecting(false); setSelectedElement(null); selectionToken.current = ""; }} />{run.status === "READY_FOR_REVIEW" && run.repairs < 1 && run.model_requests < 2 && <div><button type="button" disabled={!previewReady} onClick={toggleSelection}>{selecting ? "取消选取" : "在预览中选取元素"}</button>{selecting && <span> 请点击预览中的元素</span>}{selectedElement && <p>已选：{selectedElement.label || "页面元素"} <button type="button" onClick={() => setSelectedElement(null)}>清除</button></p>}</div>}</> : <div className="d2c-preview-placeholder">{run.status === "FAILED" ? "构建失败，暂时无法预览。" : previewError ? <><p role="alert">预览启动失败：{previewError}</p><button type="button" onClick={() => setPreviewAttempt((attempt) => attempt + 1)}>重试预览</button></> : "等待构建并启动预览。"}</div> : <><div className="d2c-file-tabs">{files.map((file, index) => <button type="button" key={file.path} className={selectedFile === index ? "active" : ""} onClick={() => setSelectedFile(index)}>{file.path}</button>)}</div><pre className="d2c-code"><code>{files[selectedFile]?.content}</code></pre></>}{["READY_FOR_REVIEW", "COMPLETE_LOCAL"].includes(run.status) && <VisualReview runId={run.run_id} candidate={run.result?.candidate_name} />}{run.result?.checks?.map((check) => <div className="d2c-check" key={check.id}><strong>{checkStatusText[check.status] || check.status}</strong> {check.message}</div>)}{run.result?.build_details && <details><summary>构建详情</summary><pre className="d2c-code">{run.result.build_details}</pre></details>}{["READY_FOR_REVIEW", "FAILED"].includes(run.status) && run.repairs < 1 && run.model_requests < 2 && <div className="d2c-repair"><label htmlFor="d2c-repair">需要修改什么？</label><textarea id="d2c-repair" rows={2} value={repairInstruction} onChange={(event) => setRepairInstruction(event.target.value)} placeholder="例如：将主按钮改为蓝色，保持其他布局。" /><button disabled={busy || !repairInstruction.trim()} onClick={() => void handleRepair()}>修改页面（剩余 1 次）</button></div>}</> : <><p className="d2c-help">{statusText[run.status] || "正在处理"}</p>{run.result?.checks?.map((check) => <div className="d2c-check" key={check.id}><strong>{checkStatusText[check.status] || check.status}</strong> {check.message}</div>)}{run.status === "FAILED" && run.result && run.repairs < 1 && run.model_requests < 2 && <div className="d2c-repair"><label htmlFor="d2c-repair-invalid">生成内容无效，可提交一次修改要求</label><textarea id="d2c-repair-invalid" rows={2} value={repairInstruction} onChange={(event) => setRepairInstruction(event.target.value)} placeholder="例如：修正返回格式，生成完整的页面文件。" /><button disabled={busy || !repairInstruction.trim()} onClick={() => void handleRepair()}>修复生成结果（剩余 1 次）</button></div>}</>}</div>}

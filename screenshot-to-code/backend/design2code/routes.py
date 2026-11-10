@@ -9,7 +9,7 @@ import shutil
 import zipfile
 from typing import Any, Literal
 
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from PIL import Image, ImageChops, ImageEnhance, ImageStat, UnidentifiedImageError
@@ -153,6 +153,15 @@ async def start_run(request: RunRequest, background: BackgroundTasks,
     if created:
         background.add_task(execute, result["run_id"])
     return result
+
+
+@router.get("/runs")
+async def list_runs(limit: int = Query(default=20, ge=1, le=100)) -> dict[str, Any]:
+    """List local task metadata without including prompts, files or credentials."""
+    with connect() as db:
+        rows = db.execute("SELECT id,status,calls,repairs,created_at,updated_at FROM runs ORDER BY created_at DESC, id DESC LIMIT ?", (limit,)).fetchall()
+    return {"runs": [{"run_id": row["id"], "status": row["status"], "model_requests": row["calls"],
+                      "repairs": row["repairs"], "created_at": row["created_at"], "updated_at": row["updated_at"]} for row in rows]}
 
 
 @router.get("/runs/{run_id}")

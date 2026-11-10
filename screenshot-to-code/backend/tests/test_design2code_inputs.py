@@ -37,6 +37,22 @@ import design2code.routes as d2c_routes
 import design2code.settings as d2c_settings
 
 
+def test_recent_runs_returns_bounded_metadata_only(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
+    with storage.connect() as db:
+        for index in range(2):
+            db.execute("INSERT INTO runs (id,set_id,revision,source_hash,idempotency_key,request_hash,status,result_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                       (f"run_{index}", "set", 1, "hash", f"key_{index}", "hash", "FAILED", '{"private":"not listed"}', f"2026-01-0{index + 1}", storage.now()))
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+    result = client.get("/api/d2c/v1/runs?limit=1")
+    assert result.status_code == 200
+    assert len(result.json()["runs"]) == 1 and result.json()["runs"][0]["run_id"] == "run_1"
+    assert "not listed" not in result.text
+    assert client.get("/api/d2c/v1/runs?limit=101").status_code == 422
+
+
 @pytest.mark.parametrize("override", ["D2C_MODEL_REQUEST_LIMIT=3", "D2C_REPAIR_LIMIT=2", "D2C_AUTO_RETRY_LIMIT=1", "D2C_MODEL_REQUEST_LIMIT=-1"])
 def test_unsafe_request_settings_block_model(tmp_path: Path, monkeypatch: MonkeyPatch, override: str) -> None:
     env = tmp_path / ".env"
