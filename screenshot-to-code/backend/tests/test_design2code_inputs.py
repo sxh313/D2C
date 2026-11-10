@@ -788,6 +788,19 @@ def test_cancel_stops_owned_build_process_tree(tmp_path: Path, monkeypatch: Monk
         thread.join(timeout=15)
 
 
+def test_build_failure_reports_exit_code_and_timeout_output(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
+    with storage.connect() as db:
+        db.execute("INSERT INTO runs (id,set_id,revision,source_hash,idempotency_key,request_hash,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                   ("run_diagnostics", "set", 1, "hash", "diag-key", "hash", "BUILDING", storage.now(), storage.now()))
+    failed = runner._run_build_command("run_diagnostics", [sys.executable, "-c", "import sys; print('diagnostic'); sys.exit(7)"], tmp_path, 5)
+    assert failed["status"] == "FAIL"
+    assert "退出码：7" in failed["details"] and "diagnostic" in failed["details"]
+    timed_out = runner._run_build_command("run_diagnostics", [sys.executable, "-u", "-c", "import time; print('before timeout', flush=True); time.sleep(30)"], tmp_path, 1)
+    assert timed_out["status"] == "FAIL"
+    assert "超时" in timed_out["message"] and "before timeout" in timed_out["details"]
+
+
 def test_preview_reuses_port_and_routes_each_candidate(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     settings: Any = SimpleNamespace(runtime_dir=tmp_path, preview_host="127.0.0.1", preview_port_start=0, preview_port_end=0)
     monkeypatch.setattr(runner, "get_settings", lambda: settings)

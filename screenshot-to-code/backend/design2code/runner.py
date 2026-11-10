@@ -131,6 +131,7 @@ def cancel_build(run_id: str) -> bool:
 
 
 def _run_build_command(run_id: str, args: list[str], candidate: Path, timeout: int) -> dict[str, Any]:
+    stage = "依赖安装" if len(args) > 1 and args[1] == "install" else "工程构建"
     with _build_lock:
         with connect() as db:
             row = db.execute("SELECT status FROM runs WHERE id=?", (run_id,)).fetchone()
@@ -141,17 +142,19 @@ def _run_build_command(run_id: str, args: list[str], candidate: Path, timeout: i
                                        stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
                                        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
                                        start_new_session=os.name != "nt")
-        except OSError:
-            return {"status": "FAIL", "message": "无法启动本地构建。"}
+        except OSError as exc:
+            return {"status": "FAIL", "message": f"无法启动{stage}。", "details": f"阶段：{stage}；启动错误类型：{type(exc).__name__}。"}
         _build_processes[run_id] = process
     try:
         try:
             stdout, stderr = process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
             _stop_process_tree(process)
-            process.communicate()
-            return {"status": "FAIL", "message": "安装或构建超时。"}
-        details = (stdout + "\n" + stderr)[-12000:]
+            stdout, stderr = process.communicate()
+            output = (stdout + "\n" + stderr)[-12000:]
+            return {"status": "FAIL", "message": f"{stage}超时。", "details": f"阶段：{stage}；超时：{timeout} 秒。\n{output}"}
+        output = (stdout + "\n" + stderr)[-12000:]
+        details = f"阶段：{stage}；退出码：{process.returncode}。\n{output}"
         if process.returncode:
             return {"status": "FAIL", "message": "依赖安装或构建失败。", "details": details}
         return {"status": "PASS", "details": details}
