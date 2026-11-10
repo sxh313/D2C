@@ -251,3 +251,19 @@
 .d2c-footer { font-family: "Microsoft YaHei UI", sans-serif; letter-spacing: 0; }
 @media (max-width: 850px) { .d2c-grid { grid-template-columns: minmax(0, 1fr); } .d2c-empty { min-height: 300px; } }
 @media (max-width: 520px) { .d2c-intro { align-items: start; } .d2c-intro h1 { font-size: 26px; } .d2c-inputs, .d2c-result { padding: 18px; } .d2c-preview { height: 460px; } .d2c-header-right { font-size: 11px; } }
+
+/* 人工复核表单：标签、选择框和备注分行排列。 */
+.d2c-check-results[aria-label="人工复核"] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+.d2c-check-results[aria-label="人工复核"] h3,
+.d2c-check-results[aria-label="人工复核"] > p,
+.d2c-check-results[aria-label="人工复核"] > label:has(textarea),
+.d2c-check-results[aria-label="人工复核"] > button { grid-column: 1 / -1; }
+.d2c-check-results[aria-label="人工复核"] h3,
+.d2c-check-results[aria-label="人工复核"] > p { margin: 0; }
+.d2c-check-results[aria-label="人工复核"] label { display: grid; gap: 6px; color: #345666; font-size: 13px; font-weight: 600; }
+.d2c-check-results[aria-label="人工复核"] select,
+.d2c-check-results[aria-label="人工复核"] textarea { width: 100%; padding: 9px 10px; border: 1px solid #cddfe2; border-radius: 7px; color: #244756; background: #fff; font: inherit; font-weight: 400; }
+.d2c-check-results[aria-label="人工复核"] textarea { min-height: 76px; resize: vertical; }
+.d2c-check-results[aria-label="人工复核"] > button { justify-self: start; padding: 9px 14px; border: 1px solid #176e70; border-radius: 7px; background: #176e70; color: #fff; cursor: pointer; }
+.d2c-check-results[aria-label="人工复核"] > button:disabled { opacity: .55; cursor: not-allowed; }
+@media (max-width: 520px) { .d2c-check-results[aria-label="人工复核"] { grid-template-columns: minmax(0, 1fr); } }
