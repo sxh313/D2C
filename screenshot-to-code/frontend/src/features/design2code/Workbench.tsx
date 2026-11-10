@@ -447,7 +447,7 @@ export default function D2CWorkbench() {
     setFigmaChecking(true); setFigmaConnection("");
     try {
       const info = await request<{ status: string; sessions: number }>("/figma/connection");
-      if (info.status === "connected") setFigmaConnection(`检测到 ${info.sessions} 个 Figma 插件会话。请确认目标文件已正确关联。`);
+      if (info.status === "connected") setFigmaConnection(`检测到 ${info.sessions} 个 Figma 插件会话。请确认目标文件已正确关联；此检查无法确认 Figma 云端同步状态。`);
       else if (info.status === "no_session") setFigmaConnection("Bridge 已启动，但未检测到插件会话。请在 Figma Desktop 中运行插件。");
       else if (info.status === "not_mcp") setFigmaConnection("当前不是 MCP 模式，请检查根目录 .env 配置。");
       else setFigmaConnection("无法连接 Bridge，请重新启动工作台。");
