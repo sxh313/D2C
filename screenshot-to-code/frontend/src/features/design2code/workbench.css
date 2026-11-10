@@ -212,3 +212,10 @@
   .d2c-result-actions a:last-child { margin-left: 0; }
   .d2c-run-meta { overflow-wrap: anywhere; }
 }
+
+/* Keep the entire reference visible and identify each image when several are used. */
+.d2c-image-item { width: 104px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.d2c-image-item .d2c-thumb { width: 100%; height: 76px; }
+.d2c-image-item .d2c-thumb img { object-fit: contain; }
+.d2c-image-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #304c5a; }
+.d2c-image-size { font-size: 11px; color: #536d7c; }
