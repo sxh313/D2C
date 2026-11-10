@@ -158,14 +158,7 @@ async def import_figma(url: str) -> dict[str, Any]:
     token = get_settings().figma_token
     if not token:
         raise HTTPException(422, "请先在根目录 .env 中填写 FIGMA_ACCESS_TOKEN 并重启后端。")
-    parts = urlsplit(url)
-    path = parts.path.strip("/").split("/")
-    if parts.scheme != "https" or parts.hostname not in {"figma.com", "www.figma.com"} or len(path) < 2 or path[0] not in {"design", "file"}:
-        raise HTTPException(422, "请输入 Figma 设计文件中的节点链接。")
-    file_key = path[1]
-    node_id = unquote(parse_qs(parts.query).get("node-id", [""])[0]).replace("-", ":")
-    if not file_key.isalnum() or not node_id or not all(c.isdigit() or c == ":" for c in node_id):
-        raise HTTPException(422, "Figma 链接需要包含有效的节点标识。")
+    file_key, node_id = _figma_link(url)
     try:
         async with httpx.AsyncClient(timeout=60, follow_redirects=False) as client:
             response = await client.get(f"https://api.figma.com/v1/files/{file_key}/nodes",
@@ -215,7 +208,10 @@ async def import_figma(url: str) -> dict[str, Any]:
 
 
 def _figma_link(url: str) -> tuple[str, str]:
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+    except ValueError as exc:
+        raise HTTPException(422, "请输入有效的 Figma 设计文件节点链接。") from exc
     path = parts.path.strip("/").split("/")
     if parts.scheme != "https" or parts.hostname not in {"figma.com", "www.figma.com"} or len(path) < 2 or path[0] not in {"design", "file"}:
         raise HTTPException(422, "请输入 Figma 设计文件中的节点链接。")

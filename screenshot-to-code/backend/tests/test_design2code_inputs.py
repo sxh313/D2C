@@ -309,6 +309,16 @@ def test_storage_closes_connection_and_rolls_back(tmp_path: Path, monkeypatch: M
     assert storage.get_input("x") is None
 
 
+
+@pytest.mark.asyncio
+async def test_malformed_figma_url_returns_validation_error(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(inputs, "get_settings", lambda: SimpleNamespace(figma_token="configured", figma_bridge_client=Path("missing")))
+    for importer in (inputs.import_figma, inputs.import_figma_mcp):
+        with pytest.raises(HTTPException) as error:
+            await importer("https://[bad/design/file?node-id=1-2")
+        assert error.value.status_code == 422
+
+
 @pytest.mark.asyncio
 async def test_figma_mcp_import_converts_node_and_png(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     png_data = io.BytesIO()
