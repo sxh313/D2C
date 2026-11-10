@@ -99,7 +99,7 @@ const checkStatusText: Record<string, string> = { PASS: "通过", FAIL: "失败"
 function VisualReview({ runId, candidate }: { runId: string; candidate?: string }) {
   const [references, setReferences] = useState<{ id: string; type: string; name: string; data_url: string }[]>([]);
   const [selected, setSelected] = useState(0);
-  const [viewport, setViewport] = useState<"desktop" | "mobile">("desktop");
+  const [viewport, setViewport] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const [error, setError] = useState("");
   const [imageError, setImageError] = useState(false);
   const [overlay, setOverlay] = useState(false);
@@ -121,7 +121,7 @@ function VisualReview({ runId, candidate }: { runId: string; candidate?: string 
     differenceRequest.current?.abort(); setDifference(null); setDifferenceError(""); setDifferenceBusy(false);
     return () => { differenceRequest.current?.abort(); };
   }, [runId, candidate, viewport, selected]);
-  async function comparePixels(mode: "desktop" | "mobile" | "reference") {
+  async function comparePixels(mode: "desktop" | "tablet" | "mobile" | "reference") {
     const reference = references[selected];
     if (!reference) return;
     differenceRequest.current?.abort();
@@ -142,7 +142,7 @@ function VisualReview({ runId, candidate }: { runId: string; candidate?: string 
       <label>参考图 <select value={selected} onChange={(event) => setSelected(Number(event.target.value))} disabled={!references.length}>
         {references.length ? references.map((item, index) => <option key={item.id} value={index}>{item.type === "figma" ? "Figma" : "截图"}：{item.name}</option>) : <option>没有图片参考</option>}
       </select></label>
-      <label>生成页面 <select value={viewport} onChange={(event) => setViewport(event.target.value as "desktop" | "mobile")}><option value="desktop">桌面 1440 × 900</option><option value="mobile">手机 390 × 844</option></select></label>
+      <label>生成页面 <select value={viewport} onChange={(event) => setViewport(event.target.value as "desktop" | "tablet" | "mobile")}><option value="desktop">桌面 1440 × 900</option><option value="tablet">平板 768 × 1024</option><option value="mobile">手机 390 × 844</option></select></label>
       <label><span>对照方式</span><select value={overlay ? "overlay" : "side"} onChange={(event) => setOverlay(event.target.value === "overlay")}><option value="side">并排</option><option value="overlay">叠加</option></select></label>
       {overlay && <label>生成页面透明度：{opacity}%<input type="range" min="0" max="100" value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} /></label>}
     </div>

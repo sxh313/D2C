@@ -51,7 +51,7 @@ async def inspect_candidate(run_id: str, candidate: str) -> dict[str, Any]:
             try:
                 observations: list[str] = []
                 failed = False
-                for name, width, height in (("desktop", 1440, 900), ("mobile", 390, 844)):
+                for name, width, height in (("desktop", 1440, 900), ("tablet", 768, 1024), ("mobile", 390, 844)):
                     page = await browser.new_page(viewport={"width": width, "height": height})
                     page_errors: list[str] = []
                     page.on("pageerror", lambda error: page_errors.append(str(error)))

@@ -268,7 +268,7 @@ async def visual_references(run_id: str) -> dict[str, Any]:
 
 
 @router.get("/runs/{run_id}/inspection-image/{viewport}")
-async def inspection_image(run_id: str, viewport: Literal["desktop", "mobile"]) -> FileResponse:
+async def inspection_image(run_id: str, viewport: Literal["desktop", "tablet", "mobile"]) -> FileResponse:
     run = read_run(run_id)
     if run is None:
         raise HTTPException(404, "找不到该任务。")
@@ -303,7 +303,7 @@ def _pixel_difference(reference: bytes, candidate_path: Any) -> dict[str, Any]:
 
 
 @router.get("/runs/{run_id}/visual-diff/{input_id}/{viewport}")
-async def visual_diff(run_id: str, input_id: str, viewport: Literal["desktop", "mobile", "reference"]) -> dict[str, Any]:
+async def visual_diff(run_id: str, input_id: str, viewport: Literal["desktop", "tablet", "mobile", "reference"]) -> dict[str, Any]:
     run = read_run(run_id)
     if run is None:
         raise HTTPException(404, "找不到该任务。")
