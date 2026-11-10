@@ -201,7 +201,7 @@ function ManualReview({ runId, candidate }: { runId: string; candidate?: string 
 }
 
 function VisualReview({ runId, candidate, version = "current" }: { runId: string; candidate?: string; version?: "current" | "previous" }) {
-  const [references, setReferences] = useState<{ id: string; type: string; name: string; data_url: string }[]>([]);
+  const [references, setReferences] = useState<{ id: string; type: string; name: string; role?: string; dimensions?: string[]; data_url: string }[]>([]);
   const [selected, setSelected] = useState(0);
   const [viewport, setViewport] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const [error, setError] = useState("");
@@ -251,6 +251,7 @@ function VisualReview({ runId, candidate, version = "current" }: { runId: string
       <label><span>对照方式</span><select value={overlay ? "overlay" : "side"} onChange={(event) => setOverlay(event.target.value === "overlay")}><option value="side">并排</option><option value="overlay">叠加</option></select></label>
       {overlay && <label>生成页面透明度：{opacity}%<input type="range" min="0" max="100" value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} /></label>}
     </div>
+    {references[selected] && <p className="d2c-help">这张参考图的用途：{references[selected].role || "未指定"}；指定维度：{references[selected].dimensions?.map((dimension) => ({ layout: "布局", style: "样式", content: "内容", behavior: "交互" } as Record<string, string>)[dimension] || dimension).join("、") || "未指定"}。不同用途的资料可能有意保留不同内容，整图像素差不能单独判断是否符合要求。</p>}
     {overlay && references[selected] && !imageError ? <><p className="d2c-help">两张图片按各自宽度等比缩放并从顶部对齐；页面尺寸或滚动长度不同时，重叠差异可能来自缩放，请结合并排视图判断。</p><div className="d2c-overlay"><img src={references[selected].data_url} alt="任务参考图" /><img className="d2c-overlay-result" style={{ opacity: opacity / 100 }} src={`${api}/runs/${runId}/inspection-image/${viewport}?candidate=${encodeURIComponent(candidate || "candidate")}&version=${version}`} alt="叠加的生成页面检查截图" onError={() => setImageError(true)} /></div></> : <div className="d2c-visual-grid"><div><strong>任务参考图</strong>{references[selected] ? <img src={references[selected].data_url} alt="任务参考图" /> : <p>本任务没有截图或 Figma 参考图。</p>}</div>
       <div><strong>构建时页面截图</strong>{imageError ? <p>截图未生成或任务版本已变化，请刷新任务并检查视口结果。</p> : <img src={`${api}/runs/${runId}/inspection-image/${viewport}?candidate=${encodeURIComponent(candidate || "candidate")}&version=${version}`} alt="生成页面检查截图" onError={() => setImageError(true)} />}</div></div>
     }

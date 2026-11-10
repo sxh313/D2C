@@ -379,6 +379,8 @@ async def visual_references(run_id: str) -> dict[str, Any]:
         if item and item["input_type"] in {"screenshot", "figma"} and item["data"].get("content_base64"):
             references.append({"id": item["input_id"], "type": item["input_type"],
                                "name": item["data"].get("name") or item["input_type"],
+                               "role": source.get("role", ""),
+                               "dimensions": [dimension for dimension, input_id in source_set.get("authority_by_dimension", {}).items() if input_id == item["input_id"]],
                                "data_url": f'data:{item["data"]["mime_type"]};base64,{item["data"]["content_base64"]}'})
     return {"references": references}
 
