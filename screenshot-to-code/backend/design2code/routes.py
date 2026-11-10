@@ -236,6 +236,51 @@ def _can_preview(run: dict[str, Any]) -> bool:
     )
 
 
+def _review_hash(source_hash: str, result: dict[str, Any]) -> str:
+    snapshot: dict[str, Any] = {"source_hash": source_hash, "candidate_name": result.get("candidate_name", "candidate"), "files": result.get("files", [])}
+    return hashlib.sha256(json_encode(snapshot).encode("utf-8")).hexdigest()
+
+
+class ManualReviewRequest(BaseModel):
+    candidate_hash: str = Field(min_length=64, max_length=64)
+    visual: Literal["PASS", "FAIL", "NOT_REVIEWED"]
+    interaction: Literal["PASS", "FAIL", "NOT_REVIEWED"]
+    note: str = Field(default="", max_length=2000)
+
+
+@router.get("/runs/{run_id}/manual-review")
+async def get_manual_review(run_id: str) -> dict[str, Any]:
+    run = read_run(run_id)
+    if run is None:
+        raise HTTPException(404, "找不到该任务。")
+    if not _has_built_candidate(run):
+        raise HTTPException(409, "构建通过后才能记录人工复核。")
+    candidate_hash = _review_hash(run["source_set_hash"], run["result"])
+    with connect() as db:
+        row = db.execute("SELECT data_json, created_at FROM manual_reviews WHERE run_id=? AND candidate_hash=?", (run_id, candidate_hash)).fetchone()
+    return {"candidate_hash": candidate_hash, "review": {**json.loads(row["data_json"]), "created_at": row["created_at"]} if row else None}
+
+
+@router.post("/runs/{run_id}/manual-review")
+async def save_manual_review(run_id: str, request: ManualReviewRequest) -> dict[str, Any]:
+    with connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT source_hash, status, result_json FROM runs WHERE id=?", (run_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "找不到该任务。")
+        result: dict[str, Any] | None = json.loads(row["result_json"]) if row["result_json"] else None
+        if row["status"] != "READY_FOR_REVIEW" or result is None or not _has_built_candidate({"result": result}):
+            raise HTTPException(409, "当前任务不可复核，请等待构建完成。")
+        candidate_hash = _review_hash(row["source_hash"], result)
+        if candidate_hash != request.candidate_hash:
+            raise HTTPException(409, "候选版本已变化，请刷新后重新复核。")
+        review = {"visual": request.visual, "interaction": request.interaction, "note": request.note.strip()}
+        timestamp = now()
+        db.execute("INSERT OR REPLACE INTO manual_reviews (run_id,candidate_hash,data_json,created_at) VALUES (?,?,?,?)",
+                   (run_id, candidate_hash, json_encode(review), timestamp))
+    return {"candidate_hash": candidate_hash, "review": {**review, "created_at": timestamp}}
+
+
 def _previous_built_run(run: dict[str, Any]) -> dict[str, Any]:
     result: dict[str, Any] = run.get("result") or {}
     previous: dict[str, Any] = result.get("previous_candidate") or {}
@@ -374,6 +419,10 @@ async def export_run(run_id: str, version: Literal["current", "previous"] = "cur
     if not candidate.is_dir():
         raise HTTPException(409, "没有可导出的工程。")
     source_set = get_source_set(run["source_set_id"], run["source_set_revision"])
+    candidate_hash = _review_hash(run["source_set_hash"], run["result"] or {})
+    with connect() as db:
+        review_row = db.execute("SELECT data_json, created_at FROM manual_reviews WHERE run_id=? AND candidate_hash=?", (run_id, candidate_hash)).fetchone()
+    manual_review: dict[str, Any] | None = {**json.loads(review_row["data_json"]), "created_at": review_row["created_at"]} if review_row else None
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(candidate.rglob("*")):
@@ -385,6 +434,7 @@ async def export_run(run_id: str, version: Literal["current", "previous"] = "cur
             "run_id": run_id, "status": run["status"], "source_set_hash": run["source_set_hash"],
             "model_requests": run["model_requests"], "candidate_version": version, "candidate_name": candidate_name,
             "checks": (run["result"] or {}).get("checks", []),
+            "candidate_review_hash": candidate_hash, "manual_review": manual_review,
             "cost_status": "UNKNOWN", "error": run["error"],
             "source_set": source_set,
         }))

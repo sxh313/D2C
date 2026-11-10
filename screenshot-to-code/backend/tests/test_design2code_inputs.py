@@ -79,6 +79,42 @@ def test_recent_runs_returns_bounded_metadata_only(tmp_path: Path, monkeypatch: 
     assert client.get("/api/d2c/v1/runs?limit=101").status_code == 422
 
 
+def test_manual_review_is_bound_to_candidate_and_does_not_change_checks(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
+    result: dict[str, Any] = {"candidate_name": "candidate", "files": [{"path": "src/App.tsx", "content": "first"}],
+              "checks": [{"id": "build", "status": "PASS"}, {"id": "visual", "status": "NOT_RUN"}]}
+    with storage.connect() as db:
+        db.execute("INSERT INTO runs (id,set_id,revision,source_hash,idempotency_key,request_hash,status,result_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                   ("run_review", "set", 1, "source", "review_key", "hash", "READY_FOR_REVIEW", json.dumps(result), storage.now(), storage.now()))
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+    url = "/api/d2c/v1/runs/run_review/manual-review"
+    initial = client.get(url).json()
+    assert initial["review"] is None
+    review: dict[str, Any] = {"candidate_hash": initial["candidate_hash"], "visual": "PASS", "interaction": "FAIL", "note": "checked"}
+    assert client.post(url, json=review).status_code == 200
+    assert client.get(url).json()["review"]["interaction"] == "FAIL"
+    candidate = tmp_path / "runs" / "run_review" / "candidate"
+    candidate.mkdir(parents=True)
+    (candidate / "package.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(d2c_routes, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
+    monkeypatch.setattr(d2c_routes, "get_source_set", lambda *_args: {"sources": []})
+    exported = client.get("/api/d2c/v1/runs/run_review/export")
+    assert exported.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(exported.content)) as archive:
+        report = json.loads(archive.read("design2code-page/report.json"))
+    assert report["manual_review"]["visual"] == "PASS" and report["checks"] == result["checks"]
+    with storage.connect() as db:
+        row = db.execute("SELECT status,result_json FROM runs WHERE id='run_review'").fetchone()
+        assert row["status"] == "READY_FOR_REVIEW" and json.loads(row["result_json"])["checks"] == result["checks"]
+        result["candidate_name"] = "candidate-2"
+        result["files"][0]["content"] = "repaired"
+        db.execute("UPDATE runs SET result_json=? WHERE id='run_review'", (json.dumps(result),))
+    assert client.post(url, json=review).status_code == 409
+    assert client.get(url).json()["review"] is None
+
+
 @pytest.mark.parametrize("status", ["FAILED", "UNKNOWN_EXTERNAL", "CANCELLED"])
 def test_interrupted_repair_keeps_built_candidate_accessible(status: str, tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     candidate = tmp_path / "runs" / "run_test" / "candidate"

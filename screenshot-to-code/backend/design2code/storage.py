@@ -49,6 +49,11 @@ def _open_connection() -> sqlite3.Connection:
         CREATE TABLE IF NOT EXISTS repair_execution_claims (
             run_id TEXT PRIMARY KEY, claimed_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS manual_reviews (
+            run_id TEXT NOT NULL, candidate_hash TEXT NOT NULL,
+            data_json TEXT NOT NULL, created_at TEXT NOT NULL,
+            PRIMARY KEY (run_id, candidate_hash)
+        );
     """)
     return db
 
