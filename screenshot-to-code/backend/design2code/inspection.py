@@ -8,6 +8,20 @@ from design2code.runner import _child_env, preview_url
 from design2code.settings import get_settings
 
 
+async def _watch_resources(page: Any, url: str, problems: set[str]) -> None:
+    """Record failed local responses and requests blocked by preview isolation."""
+    page.on("response", lambda response: problems.add("页面资源返回错误状态") if response.status >= 400 else None)
+
+    async def route_request(route: Any) -> None:
+        if route.request.url.startswith(url):
+            await route.continue_()
+        else:
+            problems.add("页面请求了被阻止的外部资源")
+            await route.abort()
+
+    await page.route("**/*", route_request)
+
+
 async def capture_reference_viewport(run_id: str, candidate: str, width: int, height: int) -> tuple[bytes, list[str]]:
     """Capture only the initial viewport, using the reference image dimensions."""
     settings = get_settings()
@@ -54,17 +68,21 @@ async def inspect_candidate(run_id: str, candidate: str) -> dict[str, Any]:
                 for name, width, height in (("desktop", 1440, 900), ("tablet", 768, 1024), ("mobile", 390, 844)):
                     page = await browser.new_page(viewport={"width": width, "height": height})
                     page_errors: list[str] = []
+                    resource_errors: set[str] = set()
                     page.on("pageerror", lambda error: page_errors.append(str(error)))
                     page.on("console", lambda message: page_errors.append(message.text) if message.type == "error" else None)
-                    await page.route("**/*", lambda route: route.continue_() if route.request.url.startswith(url) else route.abort())
+                    await _watch_resources(page, url, resource_errors)
                     response = await page.goto(url, wait_until="load", timeout=15000)
                     if response is None or not response.ok:
-                        raise RuntimeError("Preview returned an unsuccessful HTTP response")
+                        observations.append(f"{name}: 预览页面返回错误状态")
+                        failed = True
+                        await page.close()
+                        continue
                     overflow = await page.evaluate("() => document.documentElement.scrollWidth > window.innerWidth + 1")
                     target = settings.runtime_dir / "runs" / run_id / candidate / f"inspection-{name}.png"
                     await page.screenshot(path=str(target), full_page=True, timeout=15000)
-                    observations.append(f"{name}: {'水平溢出' if overflow else '无水平溢出'}" + ("，页面脚本或资源报错" if page_errors else ""))
-                    failed = failed or bool(overflow) or bool(page_errors)
+                    observations.append(f"{name}: {'水平溢出' if overflow else '无水平溢出'}" + ("，页面脚本或资源报错" if page_errors else "") + ("，" + "、".join(sorted(resource_errors)) if resource_errors else ""))
+                    failed = failed or bool(overflow) or bool(page_errors) or bool(resource_errors)
                     await page.close()
                 return {"id": "viewport", "status": "FAIL" if failed else "PASS", "message": "；".join(observations) + "。已保存截图；视觉还原和功能仍需人工检查。"}
             finally:
@@ -83,12 +101,13 @@ async def inspect_interactions(run_id: str, candidate: str) -> dict[str, Any]:
             try:
                 page = await browser.new_page(viewport={"width": 1280, "height": 800})
                 errors: list[str] = []
+                resource_errors: set[str] = set()
                 page.on("pageerror", lambda error: errors.append(str(error)))
                 page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
-                await page.route("**/*", lambda route: route.continue_() if route.request.url.startswith(url) else route.abort())
+                await _watch_resources(page, url, resource_errors)
                 response = await page.goto(url, wait_until="load", timeout=15000)
                 if response is None or not response.ok:
-                    raise RuntimeError("Preview returned an unsuccessful HTTP response")
+                    return {"id": "interaction_smoke", "status": "FAIL", "message": "预览页面返回错误状态，无法执行交互冒烟检查。"}
                 controls = await page.locator("button, input, select, textarea").count()
                 exercised = 0
                 incomplete = 0
@@ -98,7 +117,7 @@ async def inspect_interactions(run_id: str, candidate: str) -> dict[str, Any]:
                     if index:
                         response = await page.goto(url, wait_until="load", timeout=15000)
                         if response is None or not response.ok:
-                            raise RuntimeError("Preview returned an unsuccessful HTTP response")
+                            return {"id": "interaction_smoke", "status": "FAIL", "message": "预览页面返回错误状态，交互冒烟检查中断。"}
                     locator = page.locator("button, input, select, textarea").nth(index)
                     try:
                         if not await locator.is_visible() or not await locator.is_enabled():
@@ -125,6 +144,8 @@ async def inspect_interactions(run_id: str, candidate: str) -> dict[str, Any]:
                     except Exception:
                         incomplete += 1
                 await page.close()
+                if resource_errors:
+                    return {"id": "interaction_smoke", "status": "FAIL", "message": "交互冒烟检查发现资源问题：" + "；".join(sorted(resource_errors)) + "。"}
                 if errors:
                     return {"id": "interaction_smoke", "status": "FAIL", "message": "交互冒烟检查发现页面错误：" + "；".join(errors[:3])}
                 if incomplete or controls > 30:

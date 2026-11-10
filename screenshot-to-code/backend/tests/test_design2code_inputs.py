@@ -561,6 +561,32 @@ async def test_preview_selection_intercepts_click_without_changing_exported_html
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("resource", ["missing.json", "https://example.invalid/data.json"])
+async def test_inspection_reports_resource_failures(tmp_path: Path, monkeypatch: MonkeyPatch, resource: str) -> None:
+    settings: Any = SimpleNamespace(runtime_dir=tmp_path, preview_host="127.0.0.1", preview_port_start=0, preview_port_end=0)
+    monkeypatch.setattr(runner, "get_settings", lambda: settings)
+    monkeypatch.setattr(inspection, "get_settings", lambda: settings)
+    runner.close_previews()
+    dist = tmp_path / "runs" / "run_resources" / "candidate" / "dist"
+    dist.mkdir(parents=True)
+    # Exercise the routing layer independently of the preview's CSP, which
+    # otherwise blocks the external URL before Playwright can route it.
+    monkeypatch.setattr(runner.PreviewHandler, "end_headers", runner.SimpleHTTPRequestHandler.end_headers)
+    (dist / "index.html").write_text(
+        f'<link rel="icon" href="data:,"><button>Go</button><script src="{resource}"></script>', encoding="utf-8"
+    )
+    try:
+        viewport = await inspection.inspect_candidate("run_resources", "candidate")
+        interaction = await inspection.inspect_interactions("run_resources", "candidate")
+        assert viewport["status"] == "FAIL", viewport
+        assert interaction["status"] == "FAIL", interaction
+        expected = "被阻止的外部资源" if resource.startswith("https:") else "资源返回错误状态"
+        assert expected in viewport["message"] and expected in interaction["message"]
+    finally:
+        runner.close_previews()
+
+
+@pytest.mark.asyncio
 async def test_interaction_smoke_check_exercises_local_controls(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     settings: Any = SimpleNamespace(runtime_dir=tmp_path, preview_host="127.0.0.1", preview_port_start=0, preview_port_end=0)
     monkeypatch.setattr(runner, "get_settings", lambda: settings)
