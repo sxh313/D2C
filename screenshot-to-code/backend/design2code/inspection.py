@@ -70,6 +70,52 @@ async def inspect_search(run_id: str, candidate: str, rule: dict[str, str]) -> d
         return {"id": "spec_search_01", "status": "NOT_RUN", "message": "搜索验收未能运行；请检查本机浏览器和预览。"}
 
 
+async def inspect_dialog(run_id: str, candidate: str, rule: dict[str, str]) -> dict[str, Any]:
+    """Verify one user-declared, accessible dialog open/close flow."""
+    stage = "加载页面"
+    try:
+        url = preview_url(run_id, get_settings(), candidate)
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(headless=True, env=dict(_child_env()))
+            try:
+                page = await browser.new_page(viewport={"width": 1280, "height": 800})
+                errors: set[str] = set()
+                page.on("pageerror", lambda _error: errors.add("页面脚本报错"))
+                page.on("console", lambda message: errors.add("页面或资源报错") if message.type == "error" else None)
+                await _watch_resources(page, url, errors)
+                response = await page.goto(url, wait_until="load", timeout=15000)
+                if response is None:
+                    raise RuntimeError("Preview did not respond")
+                if not response.ok:
+                    return {"id": "spec_dialog_01", "status": "FAIL", "message": "弹窗验收失败：预览页面返回错误状态。"}
+                button = page.get_by_role("button", name=rule["open_button"], exact=True)
+                dialog = page.get_by_role("dialog", name=rule["dialog_name"], exact=True)
+                stage = "查找打开按钮"
+                await expect(button).to_have_count(1, timeout=3000)
+                stage = "检查初始弹窗状态"
+                await expect(dialog).to_have_count(0, timeout=3000)
+                stage = "打开弹窗"
+                await button.click(timeout=3000)
+                stage = "查找指定弹窗"
+                await expect(dialog).to_have_count(1, timeout=3000)
+                await expect(dialog).to_be_visible(timeout=3000)
+                close = dialog.get_by_role("button", name=rule["close_button"], exact=True)
+                stage = "查找关闭按钮"
+                await expect(close).to_have_count(1, timeout=3000)
+                stage = "关闭弹窗"
+                await close.click(timeout=3000)
+                await expect(dialog).to_be_hidden(timeout=3000)
+                if errors:
+                    return {"id": "spec_dialog_01", "status": "FAIL", "message": "弹窗验收发现页面或资源错误。"}
+                return {"id": "spec_dialog_01", "status": "PASS", "message": "弹窗验收通过：指定按钮打开并关闭了指定弹窗；仅覆盖这一组操作。"}
+            finally:
+                await browser.close()
+    except (PlaywrightTimeoutError, AssertionError):
+        return {"id": "spec_dialog_01", "status": "FAIL", "message": f"弹窗验收失败：{stage}未符合规则，请检查按钮名称、弹窗无障碍名称及唯一性。"}
+    except Exception:
+        return {"id": "spec_dialog_01", "status": "NOT_RUN", "message": "弹窗验收未能运行；请检查本机浏览器和预览。"}
+
+
 async def capture_reference_viewport(run_id: str, candidate: str, width: int, height: int) -> tuple[bytes, list[str]]:
     """Capture only the initial viewport, using the reference image dimensions."""
     settings = get_settings()

@@ -108,16 +108,25 @@ class SearchCheck(BaseModel):
     hidden_text: str = Field(min_length=1, max_length=150)
 
 
+class DialogCheck(BaseModel):
+    open_button: str = Field(min_length=1, max_length=100)
+    dialog_name: str = Field(min_length=1, max_length=100)
+    close_button: str = Field(min_length=1, max_length=100)
+
+
 class SourceSetRequest(BaseModel):
     sources: list[SourceReference] = Field(min_length=1, max_length=6)
     instructions: str = Field(default="", max_length=30_000)
     authority_by_dimension: dict[str, str] = Field(default_factory=dict)
     resolutions: list[dict[str, Any]] = Field(default_factory=lambda: [])
     search_check: SearchCheck | None = None
+    dialog_check: DialogCheck | None = None
 
 
 @router.post("/source-sets")
 async def create_source_set(request: SourceSetRequest) -> dict[str, Any]:
+    if request.dialog_check and any(not value.strip() or value != value.strip() for value in request.dialog_check.model_dump().values()):
+        raise HTTPException(422, "弹窗验收字段不能留空或包含首尾空格。")
     if request.search_check:
         fields = request.search_check.model_dump()
         if any(not value.strip() or value != value.strip() for value in fields.values()) or fields["visible_text"] == fields["hidden_text"]:

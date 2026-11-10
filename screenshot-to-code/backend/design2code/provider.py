@@ -22,6 +22,8 @@ The preview runs locally with external network resources blocked. Do not load fo
 scripts, images, or other assets from remote URLs (including Google Fonts and CSS @import URLs).
 Use system fonts and available local assets; preserve the visual intent as closely as possible.
 Use local mock data for interactions. Do not wrap the JSON in markdown.
+When dialog_check is provided, implement the named buttons and an initially closed accessible dialog
+with role="dialog" and an accessible name matching dialog_name. Keep the close button inside it.
 """
 
 
@@ -63,7 +65,7 @@ def _materials(source_set: dict[str, Any]) -> tuple[str, list[str]]:
         summaries.append(summary)
     context = json_encode({"instructions": source_set["instructions"],
                            "authority_by_dimension": source_set["authority_by_dimension"],
-                           "resolutions": source_set["resolutions"], "search_check": source_set.get("search_check"), "sources": summaries})
+                           "resolutions": source_set["resolutions"], "search_check": source_set.get("search_check"), "dialog_check": source_set.get("dialog_check"), "sources": summaries})
     if len(context.encode("utf-8")) > 1_000_000:
         raise ProviderError("INPUT_TOO_LARGE", "设计资料过大，请缩小 Figma 节点或 Spec 范围。")
     return context, images

@@ -16,7 +16,9 @@ type SelectedElement = { html: string; context: string; label: string };
 
 type SearchRule = { placeholder: string; query: string; visible_text: string; hidden_text: string };
 const emptySearchRule: SearchRule = { placeholder: "", query: "", visible_text: "", hidden_text: "" };
-type Draft = { images: ImageInput[]; spec: string; figma: string; bundle: ImageInput | null; instruction: string; authority: Record<Dimension, string>; searchRule?: SearchRule };
+type DialogRule = { open_button: string; dialog_name: string; close_button: string };
+const emptyDialogRule: DialogRule = { open_button: "", dialog_name: "", close_button: "" };
+type Draft = { images: ImageInput[]; spec: string; figma: string; bundle: ImageInput | null; instruction: string; authority: Record<Dimension, string>; searchRule?: SearchRule; dialogRule?: DialogRule };
 
 function openDraftDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -238,6 +240,7 @@ export default function D2CWorkbench() {
   const [images, setImages] = useState<ImageInput[]>([]);
   const [spec, setSpec] = useState("");
   const [searchRule, setSearchRule] = useState<SearchRule>(emptySearchRule);
+  const [dialogRule, setDialogRule] = useState<DialogRule>(emptyDialogRule);
   const [figma, setFigma] = useState("");
   const [figmaConnection, setFigmaConnection] = useState("");
   const [figmaChecking, setFigmaChecking] = useState(false);
@@ -290,6 +293,7 @@ export default function D2CWorkbench() {
       setImages(imagesRef.current);
       setSpec(draft.spec || "");
       setSearchRule(draft.searchRule || emptySearchRule);
+      setDialogRule(draft.dialogRule || emptyDialogRule);
       setFigma(draft.figma || "");
       setBundle(draft.bundle || null);
       setInstruction(draft.instruction || "");
@@ -301,13 +305,13 @@ export default function D2CWorkbench() {
 
   useEffect(() => {
     if (!draftReady || !draftStorageAvailable) return;
-    const draft: Draft = { images, spec, figma, bundle, instruction, authority, searchRule };
+    const draft: Draft = { images, spec, figma, bundle, instruction, authority, searchRule, dialogRule };
     const timer = window.setTimeout(() => {
       draftWrites.current = draftWrites.current.catch(() => {}).then(() => writeDraft(draft));
       void draftWrites.current.then(() => setDraftError("")).catch(() => setDraftError("草稿保存失败，请检查浏览器存储空间。"));
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [draftReady, draftStorageAvailable, images, spec, figma, bundle, instruction, authority, searchRule]);
+  }, [draftReady, draftStorageAvailable, images, spec, figma, bundle, instruction, authority, searchRule, dialogRule]);
 
   const addImages = useCallback(async (files: File[]) => {
     if (!files.length) return;
@@ -508,6 +512,8 @@ export default function D2CWorkbench() {
     if (!images.length && !spec.trim() && !figma.trim() && !bundle) { setError("请至少添加一份设计资料。"); return; }
     const searchValues = Object.values(searchRule).map((value) => value.trim());
     if (searchValues.some(Boolean) && (searchValues.some((value) => !value) || searchValues[2] === searchValues[3])) { setError("搜索验收请填写全部四项，且两条示例文本必须不同。"); return; }
+    const dialogValues = Object.values(dialogRule).map((value) => value.trim());
+    if (dialogValues.some(Boolean) && dialogValues.some((value) => !value)) { setError("弹窗验收请填写全部三项。"); return; }
     setBusy(true); setError(""); setSelectedFile(0); setView("preview");
     try {
       const sources: { input_id: string; role: string; scope: object; required: boolean }[] = [];
@@ -539,7 +545,8 @@ export default function D2CWorkbench() {
         else if (choice) throw new Error("来源规则引用的资料已移除，请重新选择。");
       }
       const searchCheck = searchValues.some(Boolean) ? { placeholder: searchValues[0], query: searchValues[1], visible_text: searchValues[2], hidden_text: searchValues[3] } : null;
-      const sourceSet = await request<SourceSet>("/source-sets", jsonPost({ sources, instructions: instruction, authority_by_dimension: authorityByDimension, search_check: searchCheck }));
+      const dialogCheck = dialogValues.some(Boolean) ? { open_button: dialogValues[0], dialog_name: dialogValues[1], close_button: dialogValues[2] } : null;
+      const sourceSet = await request<SourceSet>("/source-sets", jsonPost({ sources, instructions: instruction, authority_by_dimension: authorityByDimension, search_check: searchCheck, dialog_check: dialogCheck }));
       await request(`/source-sets/${sourceSet.source_set_id}/confirm`, jsonPost(sourceSet));
       const pending = { sourceSet, key: crypto.randomUUID() };
       // Store before sending: a lost response can then be recovered with the same key.
@@ -636,6 +643,8 @@ export default function D2CWorkbench() {
   const isRunning = busy || !!run && ["CREATED", "GENERATING", "BUILDING", "REPAIRING"].includes(run.status);
   const searchFilled = Object.values(searchRule).filter((value) => value.trim()).length;
   const searchSummary = !searchFilled ? "未设置" : searchFilled < 4 ? "未填写完整" : searchRule.visible_text.trim() === searchRule.hidden_text.trim() ? "示例文本重复" : "已设置";
+  const dialogFilled = Object.values(dialogRule).filter((value) => value.trim()).length;
+  const dialogSummary = !dialogFilled ? "未设置" : dialogFilled < 3 ? "未填写完整" : "已设置";
   const files = run?.result?.files || [];
   if (!draftReady) return <main className="d2c-shell">正在恢复本机草稿…</main>;
   return <div className="d2c-shell">
@@ -655,6 +664,10 @@ export default function D2CWorkbench() {
         <details><summary>搜索功能验收（可选）— {searchSummary}</summary><p className="d2c-help">在生成前填写一组可验证示例。两条文本初始都应显示；搜索后第一条保留、第二条隐藏。输入框提示文字和示例文本需与页面完全一致。此检查只覆盖这一组示例，规则会保存在本机草稿中。</p>
           {([["placeholder", "搜索框提示文字", "例如：搜索任务"], ["query", "要输入的搜索词", "例如：邮件"], ["visible_text", "搜索后保留的完整文本", "例如：查看邮件"], ["hidden_text", "搜索后隐藏的完整文本", "例如：整理文件"]] as const).map(([key, label, example]) => <label className="d2c-label" key={key}>{label}<input value={searchRule[key]} maxLength={key === "visible_text" || key === "hidden_text" ? 150 : 100} placeholder={example} onChange={(event) => setSearchRule((current) => ({ ...current, [key]: event.target.value }))} /></label>)}
           <button type="button" disabled={!searchFilled} onClick={() => setSearchRule(emptySearchRule)}>清除搜索验收规则</button>
+        </details>
+        <details><summary>弹窗功能验收（可选）— {dialogSummary}</summary><p className="d2c-help">填写按钮和弹窗的无障碍名称，检查初始关闭、打开和关闭。名称需要与页面完全一致，规则保存在本机草稿中。</p>
+          {([["open_button", "打开按钮名称", "例如：新建任务"], ["dialog_name", "弹窗名称", "例如：新建任务"], ["close_button", "弹窗内关闭按钮名称", "例如：取消"]] as const).map(([key, label, example]) => <label className="d2c-label" key={key}>{label}<input value={dialogRule[key]} maxLength={100} placeholder={example} onChange={(event) => setDialogRule((current) => ({ ...current, [key]: event.target.value }))} /></label>)}
+          <button type="button" disabled={!dialogFilled} onClick={() => setDialogRule(emptyDialogRule)}>清除弹窗验收规则</button>
         </details>
         <label className="d2c-label" htmlFor="d2c-figma">Figma 节点链接 <span>{!capabilities ? "正在检查配置" : capabilities.figma_mode === "mcp" ? (capabilities.figma_configured ? "MCP 模式；请在 Figma 中运行插件" : "请先安装 MCP Bridge") : (capabilities.figma_configured ? "REST 令牌已配置" : "需要配置访问令牌")}</span></label><input id="d2c-figma" value={figma} onChange={(event) => setFigma(event.target.value)} placeholder="https://www.figma.com/design/…?node-id=…" />
         {capabilities?.figma_mode === "mcp" && <div className="d2c-help"><button type="button" disabled={figmaChecking} onClick={() => void checkFigmaConnection()}>{figmaChecking ? "正在检查…" : "检查 Figma 插件连接"}</button>{figmaConnection && <p role="status">{figmaConnection}</p>}</div>}
@@ -678,6 +691,7 @@ export default function D2CWorkbench() {
           <strong>本次资料摘要</strong>
           <p>{images.length ? `${images.length} 张截图作为视觉参考` : "未添加截图"}；{spec.trim() ? "Spec 作为内容与交互参考" : "未添加 Spec"}；{figma.trim() ? "Figma 作为结构参考" : "未添加 Figma"}；{bundle ? "项目包作为源码和图片参考" : "未添加项目包"}。</p>
           <p>搜索功能验收：{searchSummary}{searchSummary === "已设置" ? `（搜索词：${searchRule.query.trim()}）` : ""}。</p>
+          <p>弹窗功能验收：{dialogSummary}。</p>
           <p>资料存在冲突时，请在生成指令中写明以哪一份为准。系统不会自动判断所有冲突。</p>
         </div>
         {error && <div className="d2c-error" role="alert">{error}</div>}

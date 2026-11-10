@@ -10,7 +10,7 @@ from typing import Any, cast
 from fastapi import HTTPException
 
 from design2code.provider import ProviderError, generate
-from design2code.inspection import inspect_candidate, inspect_interactions, inspect_search
+from design2code.inspection import inspect_candidate, inspect_dialog, inspect_interactions, inspect_search
 from design2code.runner import build_candidate, cancel_build
 from design2code.settings import get_settings
 from design2code.storage import connect, get_input, get_source_set, identifier, json_encode, now
@@ -162,6 +162,8 @@ async def execute(run_id: str) -> None:
                                          {"id": "interactions", "status": "NOT_RUN", "message": "未执行交互检查。"}]}
             if source_set.get("search_check"):
                 invalid_result["checks"].append({"id": "spec_search_01", "status": "NOT_RUN", "message": "生成内容无效，搜索验收未执行。"})
+            if source_set.get("dialog_check"):
+                invalid_result["checks"].append({"id": "spec_dialog_01", "status": "NOT_RUN", "message": "生成内容无效，弹窗验收未执行。"})
             with connect() as db:
                 changed = db.execute("UPDATE runs SET status='FAILED', result_json=?, error=?, updated_at=? WHERE id=? AND status='GENERATING'",
                                      (json_encode(invalid_result), str(exc), now(), run_id))
@@ -188,6 +190,8 @@ async def execute(run_id: str) -> None:
             result["checks"].append(await inspect_interactions(run_id, "candidate"))
         if source_set.get("search_check"):
             result["checks"].append(await inspect_search(run_id, "candidate", source_set["search_check"]) if build["status"] == "PASS" else {"id": "spec_search_01", "status": "NOT_RUN", "message": "构建未通过，搜索验收未执行。"})
+        if source_set.get("dialog_check"):
+            result["checks"].append(await inspect_dialog(run_id, "candidate", source_set["dialog_check"]) if build["status"] == "PASS" else {"id": "spec_dialog_01", "status": "NOT_RUN", "message": "构建未通过，弹窗验收未执行。"})
         if build.get("details"):
             result["build_details"] = build["details"]
         final_status = "READY_FOR_REVIEW" if build["status"] == "PASS" else "FAILED"
@@ -285,6 +289,8 @@ async def execute_repair(run_id: str, instruction: str) -> None:
             result["checks"].append(await inspect_interactions(run_id, "candidate-2"))
         if source_set.get("search_check"):
             result["checks"].append(await inspect_search(run_id, "candidate-2", source_set["search_check"]) if build["status"] == "PASS" else {"id": "spec_search_01", "status": "NOT_RUN", "message": "构建未通过，搜索验收未执行。"})
+        if source_set.get("dialog_check"):
+            result["checks"].append(await inspect_dialog(run_id, "candidate-2", source_set["dialog_check"]) if build["status"] == "PASS" else {"id": "spec_dialog_01", "status": "NOT_RUN", "message": "构建未通过，弹窗验收未执行。"})
         if build.get("details"):
             result["build_details"] = build["details"]
         status = "READY_FOR_REVIEW" if build["status"] == "PASS" else "FAILED"
