@@ -19,3 +19,7 @@
 ## 截图：screenshot-board
 
 上传 `reference.png`，并将 `instruction.txt` 粘贴到生成指令。图像是 1000 × 700 的任务看板示例，文字为示例任务；来源于本机历史任务 `run_548ec7fdcbff4d76ba380d202193a9af` 的输入快照，原始制作来源未记录。图像哈希已记入顶层 `manifest.json`。历史候选的外部字体受预览策略拦截，视觉比较限制见根目录《固定样例验收记录.md》；新生成结果须重新检查。
+
+## 核对固定输入
+
+在项目根目录运行 `python examples/fixed-inputs/verify.py`。工具检查 `checksums.json` 列出的 17 个样例文件，包括截图、Spec、指令、标签验收规则和组合来源设置；全部一致返回退出码 0，缺失或不匹配返回 1。为兼容 Windows 与其他系统的 Git 换行方式，文本和 JSON 在校验前将 CRLF 转为 LF，图片按原始字节校验。清单本身需要随可信版本一起获取；校验不证明生成结果相同，也不包含 Figma 节点、模型、模板或运行环境。

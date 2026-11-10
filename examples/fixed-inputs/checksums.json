@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "text_normalization": "CRLF to LF",
+  "files": {
+    "screenshot-board/instruction.txt": "852bb35f57e92cb71fa577960d9900d63bad1fa54796d81bab19ad13c5171f00",
+    "screenshot-board/reference.png": "ab350b5428af0ed9f9152e2a3658cc1da96abf8b8d8726f625717f9fe0549096",
+    "screenshot-feedback/instruction.txt": "22a6a5c72e04e9ce30453597c44814dc92eb99c40b8c4dc4e57a702d66b73452",
+    "screenshot-feedback/reference.png": "10868b5e917d9e2e2b6e01a9ecba94fe7c64ed1deab7d25f443907a346c4b48e",
+    "screenshot-tasks/instruction.txt": "bfac7a8ed151b7bb548b8fcb41a8214f8bf28dfa252f9522dc61be9270f99207",
+    "screenshot-tasks/reference.png": "1998f33c2cc2882693482eca27481c3cdf8bc5f9f33b73763b9f00da77b0c89d",
+    "spec-feedback/instruction.txt": "4e546410391b180ef0df3ec10caf938238aa7863d6437dcac3164039fdb9d52d",
+    "spec-feedback/spec.txt": "ed4ff704d8be3432e963d786f1c139a5a8db8d1bc351d38b7fba059745eb6b89",
+    "spec-search/instruction.txt": "1ee60d4d6b0a75d4ccf066e889433d3267b456eaafe95969526400b5273a6f2c",
+    "spec-search/spec.txt": "b5444eab7f74f45c22bb08af013822adea6b0f0b31cd052cdd0149997c5738e7",
+    "spec-tabs/checks.json": "341ecbab684328583bcee6e88a0fee699622467b16870b27d13d5333ce5490d1",
+    "spec-tabs/instruction.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "spec-tabs/spec.txt": "83dcd8d956a236e88a4181983e4e0cecde8258348efbaf21bde599476ca36d76",
+    "combo-feedback/instruction.txt": "0f9104979256056164da049840f7caccbb5eb1f07abec007cf87e5bd6e8925ef",
+    "combo-feedback/manifest.json": "d6be605a93b435dee2b4ec2ce46a910ddf6715e954fcf81dfd7864855ef6786d",
+    "combo-feedback/reference.png": "10868b5e917d9e2e2b6e01a9ecba94fe7c64ed1deab7d25f443907a346c4b48e",
+    "combo-feedback/spec.txt": "86918c34818df6457cc06a2de0a48e94a9c2c954b068c57d888c7c7cc22f39d0"
+  }
+}
