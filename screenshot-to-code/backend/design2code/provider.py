@@ -52,7 +52,10 @@ def _materials(source_set: dict[str, Any]) -> tuple[str, list[str]]:
             summary["format"] = data["format"]
             summary["reference_files"] = data["files"]
             summary["available_assets"] = [f"./{asset['path']}" for asset in data["assets"]]
-            summary["note"] = "Reference source only; use available assets by relative path. Do not run or copy package scripts."
+            summary["note"] = ("Reference source only; do not run or copy package scripts. "
+                               "Available image paths are relative to the page and work in JSX img src or inline styles. "
+                               "Do not put those ./images paths directly in CSS files: built CSS is served from assets/. "
+                               "For CSS background images, prefer a JSX inline backgroundImage using the page-relative path.")
         summaries.append(summary)
     context = json_encode({"instructions": source_set["instructions"],
                            "authority_by_dimension": source_set["authority_by_dimension"],
