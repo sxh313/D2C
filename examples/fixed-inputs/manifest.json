@@ -1,0 +1,42 @@
+[
+  {
+    "case": "screenshot-feedback",
+    "type": "screenshot",
+    "historical_run": "run_b73776d7f2dc49c094ef2634be704bae",
+    "file": "reference.png",
+    "file_sha256": "10868b5e917d9e2e2b6e01a9ecba94fe7c64ed1deab7d25f443907a346c4b48e",
+    "has_optional_checks": false
+  },
+  {
+    "case": "screenshot-tasks",
+    "type": "screenshot",
+    "historical_run": "run_5aa9eb7911e840bf8f03c4818b565dd5",
+    "file": "reference.png",
+    "file_sha256": "1998f33c2cc2882693482eca27481c3cdf8bc5f9f33b73763b9f00da77b0c89d",
+    "has_optional_checks": false
+  },
+  {
+    "case": "spec-feedback",
+    "type": "spec",
+    "historical_run": "run_7141ca4119c24c74aca1fe9209b2e0b6",
+    "file": "spec.txt",
+    "file_sha256": "ed4ff704d8be3432e963d786f1c139a5a8db8d1bc351d38b7fba059745eb6b89",
+    "has_optional_checks": false
+  },
+  {
+    "case": "spec-search",
+    "type": "spec",
+    "historical_run": "run_2fff6bbf071a4be5badc426b1f7b8019",
+    "file": "spec.txt",
+    "file_sha256": "b5444eab7f74f45c22bb08af013822adea6b0f0b31cd052cdd0149997c5738e7",
+    "has_optional_checks": false
+  },
+  {
+    "case": "spec-tabs",
+    "type": "spec",
+    "historical_run": "run_b622de3f56544a9a91bb5048711341e7",
+    "file": "spec.txt",
+    "file_sha256": "83dcd8d956a236e88a4181983e4e0cecde8258348efbaf21bde599476ca36d76",
+    "has_optional_checks": true
+  }
+]

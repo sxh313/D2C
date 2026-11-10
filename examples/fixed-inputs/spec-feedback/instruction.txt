@@ -1,0 +1,1 @@
+生成 React + TypeScript 工程，将反馈表单拆分成 src/components/FeedbackForm.tsx 组件，src/App.tsx 调用该组件；使用易于识别的中文标签与按钮，禁止外部字体和网络请求。
