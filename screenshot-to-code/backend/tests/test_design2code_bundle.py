@@ -116,6 +116,29 @@ def test_bundle_asset_copied_into_candidate(tmp_path: Path, monkeypatch: MonkeyP
     assert (tmp_path / "runs/run_bundle/candidate/public/images/logo.png").read_bytes() == png()
 
 
+def test_visual_references_include_role_and_assigned_dimensions(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    client = client_for(tmp_path, monkeypatch)
+    screenshot = client.post("/api/d2c/v1/design-inputs", json={
+        "input_type": "screenshot", "name": "reference.png",
+        "content": "data:image/png;base64," + base64.b64encode(png()).decode(),
+    }).json()
+    input_id = screenshot["input_id"]
+    source = client.post("/api/d2c/v1/source-sets", json={
+        "sources": [{"input_id": input_id, "role": "颜色参考"}],
+        "authority_by_dimension": {"style": input_id, "content": "instructions"},
+    }).json()
+    with storage.connect() as db:
+        db.execute("INSERT INTO runs (id,set_id,revision,source_hash,idempotency_key,request_hash,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                   ("run_visual_role", source["source_set_id"], 1, "hash", "visual-role", "hash", "CREATED", storage.now(), storage.now()))
+    response = client.get("/api/d2c/v1/runs/run_visual_role/visual-references")
+    assert response.status_code == 200
+    references = response.json()["references"]
+    assert len(references) == 1
+    assert references[0]["id"] == input_id
+    assert references[0]["role"] == "颜色参考"
+    assert references[0]["dimensions"] == ["style"]
+
+
 @pytest.mark.skipif(os.environ.get("D2C_REAL_BUILD_TEST") != "1", reason="requires pnpm and a real dependency installation")
 def test_bundle_asset_survives_real_build_and_nested_preview(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """Synthetic archive and model output, real import, Vite build and preview server."""
