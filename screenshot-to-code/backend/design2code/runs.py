@@ -71,10 +71,12 @@ def create_run(set_id: str, revision: int, source_hash: str, key: str) -> tuple[
     request_hash = hashlib.sha256(json_encode({"set_id": set_id, "revision": revision, "hash": source_hash}).encode()).hexdigest()
     with connect() as db:
         db.execute("BEGIN IMMEDIATE")
-        existing = db.execute("SELECT id, request_hash FROM runs WHERE idempotency_key = ?", (key,)).fetchone()
+        existing = db.execute("SELECT id, request_hash, status FROM runs WHERE idempotency_key = ?", (key,)).fetchone()
         if existing:
             if existing["request_hash"] != request_hash:
                 raise HTTPException(409, "幂等键已用于另一项任务。")
+            if existing["status"] == "DELETED":
+                raise HTTPException(409, "此任务记录已删除，请重新创建任务。")
             return {"run_id": existing["id"]}, False
         _ensure_model_available(settings)
         source_set = get_source_set(set_id, revision)
@@ -97,7 +99,7 @@ def create_run(set_id: str, revision: int, source_hash: str, key: str) -> tuple[
 def read_run(run_id: str) -> dict[str, Any] | None:
     with connect() as db:
         row = db.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
-    if row is None:
+    if row is None or row["status"] == "DELETED":
         return None
     result = json.loads(row["result_json"]) if row["result_json"] else None
     return {"run_id": row["id"], "source_set_id": row["set_id"],

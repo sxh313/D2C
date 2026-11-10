@@ -5,6 +5,7 @@ import asyncio
 import base64
 import io
 import json
+import re
 import shutil
 import zipfile
 from typing import Any, Literal
@@ -212,9 +213,33 @@ async def start_run(request: RunRequest, background: BackgroundTasks,
 async def list_runs(limit: int = Query(default=20, ge=1, le=100)) -> dict[str, Any]:
     """List local task metadata without including prompts, files or credentials."""
     with connect() as db:
-        rows = db.execute("SELECT id,status,calls,repairs,created_at,updated_at FROM runs ORDER BY created_at DESC, id DESC LIMIT ?", (limit,)).fetchall()
+        rows = db.execute("SELECT id,status,calls,repairs,created_at,updated_at FROM runs WHERE status != 'DELETED' ORDER BY created_at DESC, id DESC LIMIT ?", (limit,)).fetchall()
     return {"runs": [{"run_id": row["id"], "status": row["status"], "model_requests": row["calls"],
                       "repairs": row["repairs"], "created_at": row["created_at"], "updated_at": row["updated_at"]} for row in rows]}
+
+
+class DeleteHistoryRequest(BaseModel):
+    run_ids: list[str] = Field(min_length=1, max_length=100)
+
+
+@router.post("/runs/delete-history")
+async def delete_history(request: DeleteHistoryRequest) -> dict[str, Any]:
+    """Delete finished task records while retaining idempotency and local files."""
+    ids = list(dict.fromkeys(request.run_ids))
+    if any(not re.fullmatch(r"run_[a-f0-9]{32}", run_id) for run_id in ids):
+        raise HTTPException(422, "任务 ID 格式无效。")
+    with connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        rows = [db.execute("SELECT status FROM runs WHERE id=?", (run_id,)).fetchone() for run_id in ids]
+        if any(row is None or row["status"] == "DELETED" for row in rows):
+            raise HTTPException(404, "部分任务不存在或已删除，请刷新列表。")
+        if any(row["status"] not in {"READY_FOR_REVIEW", "COMPLETE_LOCAL", "FAILED"} for row in rows if row):
+            raise HTTPException(409, "只能删除已完成或失败的任务；运行中或结果未知的任务请保留。")
+        for run_id in ids:
+            db.execute("UPDATE runs SET status='DELETED', result_json=NULL, error=NULL, updated_at=? WHERE id=?", (now(), run_id))
+            db.execute("DELETE FROM run_events WHERE run_id=?", (run_id,))
+            db.execute("DELETE FROM manual_reviews WHERE run_id=?", (run_id,))
+    return {"deleted": ids}
 
 
 @router.get("/runs/{run_id}")
