@@ -86,6 +86,10 @@ function VisualReview({ runId, candidate }: { runId: string; candidate?: string 
   const [imageError, setImageError] = useState(false);
   const [overlay, setOverlay] = useState(false);
   const [opacity, setOpacity] = useState(50);
+  const [difference, setDifference] = useState<{ width: number; height: number; mean_channel_difference: number; image_data_url: string } | null>(null);
+  const [differenceError, setDifferenceError] = useState("");
+  const [differenceBusy, setDifferenceBusy] = useState(false);
+  const differenceRequest = useRef<AbortController | null>(null);
   useEffect(() => {
     let active = true;
     setReferences([]); setSelected(0); setError("");
@@ -95,6 +99,24 @@ function VisualReview({ runId, candidate }: { runId: string; candidate?: string 
     return () => { active = false; };
   }, [runId]);
   useEffect(() => { setImageError(false); }, [runId, candidate, viewport]);
+  useEffect(() => {
+    differenceRequest.current?.abort(); setDifference(null); setDifferenceError(""); setDifferenceBusy(false);
+    return () => { differenceRequest.current?.abort(); };
+  }, [runId, candidate, viewport, selected]);
+  async function comparePixels() {
+    const reference = references[selected];
+    if (!reference) return;
+    differenceRequest.current?.abort();
+    const controller = new AbortController(); differenceRequest.current = controller;
+    setDifferenceBusy(true); setDifferenceError(""); setDifference(null);
+    try {
+      const result = await request<{ width: number; height: number; mean_channel_difference: number; image_data_url: string }>(
+        `/runs/${runId}/visual-diff/${encodeURIComponent(reference.id)}/${viewport}`, { signal: controller.signal });
+      if (!controller.signal.aborted) setDifference(result);
+    } catch (caught) {
+      if (!controller.signal.aborted) setDifferenceError(caught instanceof Error ? caught.message : "差异图生成失败。");
+    } finally { if (!controller.signal.aborted) setDifferenceBusy(false); }
+  }
   return <details className="d2c-visual-review"><summary>人工视觉对照</summary>
     <p className="d2c-help">参考图与构建时截图可以并排或叠加查看。尺寸和资料用途可能不同，请结合来源规则人工判断；这里不计算相似度，也不会自动判定通过。</p>
     {error && <p role="alert">{error}</p>}
@@ -109,6 +131,11 @@ function VisualReview({ runId, candidate }: { runId: string; candidate?: string 
     {overlay && references[selected] && !imageError ? <><p className="d2c-help">两张图片按各自宽度等比缩放并从顶部对齐；页面尺寸或滚动长度不同时，重叠差异可能来自缩放，请结合并排视图判断。</p><div className="d2c-overlay"><img src={references[selected].data_url} alt="任务参考图" /><img className="d2c-overlay-result" style={{ opacity: opacity / 100 }} src={`${api}/runs/${runId}/inspection-image/${viewport}?candidate=${encodeURIComponent(candidate || "candidate")}`} alt="叠加的生成页面检查截图" onError={() => setImageError(true)} /></div></> : <div className="d2c-visual-grid"><div><strong>任务参考图</strong>{references[selected] ? <img src={references[selected].data_url} alt="任务参考图" /> : <p>本任务没有截图或 Figma 参考图。</p>}</div>
       <div><strong>构建时页面截图</strong>{imageError ? <p>该视口截图未生成，请检查构建和视口检查结果。</p> : <img src={`${api}/runs/${runId}/inspection-image/${viewport}?candidate=${encodeURIComponent(candidate || "candidate")}`} alt="生成页面检查截图" onError={() => setImageError(true)} />}</div></div>
     }
+    <div className="d2c-pixel-diff"><button type="button" disabled={!references[selected] || imageError || differenceBusy} onClick={() => void comparePixels()}>{differenceBusy ? "正在计算…" : "生成同尺寸像素差异图"}</button>
+      <p className="d2c-help">仅比较像素尺寸完全相同的图片；亮色表示像素差异。字体、抗锯齿和动态内容都会影响结果，不代表视觉还原率或验收通过。</p>
+      {differenceError && <p role="alert">{differenceError}</p>}
+      {difference && <><p>尺寸 {difference.width} × {difference.height}；RGB 平均通道差 {difference.mean_channel_difference} / 255（越低表示像素越接近）。差异亮度放大 3 倍。</p><img src={difference.image_data_url} alt="像素差异图" /></>}
+    </div>
   </details>;
 }
 

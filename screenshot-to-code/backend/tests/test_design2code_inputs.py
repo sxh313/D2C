@@ -24,12 +24,46 @@ from pytest import MonkeyPatch
 from playwright.async_api import Error as PlaywrightError, async_playwright
 
 from design2code.routes import router
+from design2code.routes import _pixel_difference
 import design2code.storage as storage
 import design2code.runs as runs
 import design2code.inputs as inputs
 import design2code.provider as provider
 import design2code.runner as runner
 import design2code.inspection as inspection
+import design2code.routes as d2c_routes
+
+
+def test_pixel_difference_requires_equal_dimensions_and_reports_raw_difference(tmp_path: Path) -> None:
+    reference = io.BytesIO()
+    Image.new("RGB", (4, 3), "white").save(reference, format="PNG")
+    path = tmp_path / "candidate.png"
+    Image.new("RGB", (4, 3), "white").save(path)
+    same = _pixel_difference(reference.getvalue(), path)
+    assert same["mean_channel_difference"] == 0 and same["image_data_url"].startswith("data:image/png;base64,")
+    Image.new("RGB", (4, 3), "black").save(path)
+    assert _pixel_difference(reference.getvalue(), path)["mean_channel_difference"] == 255
+    Image.new("RGB", (4, 4), "white").save(path)
+    with pytest.raises(HTTPException) as exc:
+        _pixel_difference(reference.getvalue(), path)
+    assert exc.value.status_code == 422 and "尺寸不同" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_visual_diff_uses_only_task_references(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    path = tmp_path / "runs" / "run_test" / "candidate" / "inspection-mobile.png"
+    path.parent.mkdir(parents=True)
+    Image.new("RGB", (4, 3), "white").save(path)
+    image = io.BytesIO()
+    Image.new("RGB", (4, 3), "white").save(image, format="PNG")
+    monkeypatch.setattr(d2c_routes, "read_run", lambda _id: {"source_set_id": "set", "source_set_revision": 1, "result": {"candidate_name": "candidate"}})
+    monkeypatch.setattr(d2c_routes, "get_source_set", lambda *_args: {"sources": [{"input_id": "reference"}]})
+    monkeypatch.setattr(d2c_routes, "get_input", lambda _id: {"input_type": "screenshot", "data": {"content_base64": base64.b64encode(image.getvalue()).decode()}})
+    monkeypatch.setattr(d2c_routes, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
+    assert (await d2c_routes.visual_diff("run_test", "reference", "mobile"))["mean_channel_difference"] == 0
+    with pytest.raises(HTTPException) as exc:
+        await d2c_routes.visual_diff("run_test", "unrelated", "mobile")
+    assert exc.value.status_code == 404
 
 
 def test_main_app_only_exposes_tracked_model_generation() -> None:

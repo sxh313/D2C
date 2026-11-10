@@ -2,6 +2,7 @@
 
 import hashlib
 import asyncio
+import base64
 import io
 import json
 import shutil
@@ -11,6 +12,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
+from PIL import Image, ImageChops, ImageEnhance, ImageStat, UnidentifiedImageError
 
 from design2code.inputs import import_figma, import_figma_bundle, import_figma_mcp, import_image, import_spec
 from design2code.runs import cancel_run, create_run, execute, execute_repair, read_run, request_repair
@@ -231,6 +233,47 @@ async def inspection_image(run_id: str, viewport: Literal["desktop", "mobile"]) 
     if not path.is_file():
         raise HTTPException(404, "该视口的检查截图未生成。")
     return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+def _pixel_difference(reference: bytes, candidate_path: Any) -> dict[str, Any]:
+    try:
+        with Image.open(io.BytesIO(reference)) as ref, Image.open(candidate_path) as actual:
+            if ref.size != actual.size:
+                raise HTTPException(422, f"图片尺寸不同：参考图 {ref.width}×{ref.height}，页面截图 {actual.width}×{actual.height}；请使用相同尺寸的图片。")
+            if ref.width * ref.height > 4_000_000:
+                raise HTTPException(422, "图片超过 400 万像素，暂不支持像素差异图。")
+            def flatten(image: Image.Image) -> Image.Image:
+                rgba = image.convert("RGBA")
+                background = Image.new("RGBA", rgba.size, "white")
+                return Image.alpha_composite(background, rgba).convert("RGB")
+            diff = ImageChops.difference(flatten(ref), flatten(actual))
+            mean = sum(ImageStat.Stat(diff).mean) / 3
+            output = io.BytesIO()
+            ImageEnhance.Brightness(diff).enhance(3).save(output, format="PNG")
+            return {"width": ref.width, "height": ref.height, "mean_channel_difference": round(mean, 2),
+                    "image_data_url": "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii")}
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        raise HTTPException(422, "无法读取参考图或页面截图。") from exc
+
+
+@router.get("/runs/{run_id}/visual-diff/{input_id}/{viewport}")
+async def visual_diff(run_id: str, input_id: str, viewport: Literal["desktop", "mobile"]) -> dict[str, Any]:
+    run = read_run(run_id)
+    if run is None:
+        raise HTTPException(404, "找不到该任务。")
+    source_set = get_source_set(run["source_set_id"], run["source_set_revision"])
+    if source_set is None or not any(source["input_id"] == input_id for source in source_set["sources"]):
+        raise HTTPException(404, "找不到任务参考图。")
+    item = get_input(input_id)
+    if not item or item["input_type"] not in {"screenshot", "figma"} or not item["data"].get("content_base64"):
+        raise HTTPException(404, "找不到任务参考图。")
+    candidate = (run["result"] or {}).get("candidate_name", "candidate")
+    if candidate not in {"candidate", "candidate-2"}:
+        raise HTTPException(404, "找不到检查截图。")
+    path = get_settings().runtime_dir / "runs" / run_id / candidate / f"inspection-{viewport}.png"
+    if not path.is_file():
+        raise HTTPException(404, "该视口的检查截图未生成。")
+    return await asyncio.to_thread(_pixel_difference, base64.b64decode(item["data"]["content_base64"]), path)
 
 
 @router.get("/runs/{run_id}/export")
