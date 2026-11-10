@@ -188,6 +188,10 @@
 .d2c-check strong[data-status="FAIL"] { color: #a5322d; }
 .d2c-check strong[data-status="NOT_RUN"] { color: #765710; }
 .d2c-check strong[data-status="MANUAL_REVIEW"] { color: #57478a; }
+.d2c-previous { margin: 14px 0; padding: 14px; border: 1px solid #e9d9b8; border-radius: 8px; background: #fffaf0; font-size: 13px; line-height: 1.5; }
+.d2c-previous p { margin: 6px 0 10px; }
+.d2c-previous button, .d2c-previous a { display: inline-block; margin: 0 8px 8px 0; padding: 8px 10px; border: 1px solid #b5ced9; border-radius: 6px; color: #205f79; background: #fff; font: inherit; text-decoration: none; cursor: pointer; }
+.d2c-previous iframe { margin-top: 8px; }
 .d2c-shell button:not(:disabled):hover, .d2c-shell a:hover { filter: brightness(.95); }
 @media (max-width: 850px) { .d2c-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 520px) {

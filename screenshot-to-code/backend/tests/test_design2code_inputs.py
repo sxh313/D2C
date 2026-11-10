@@ -107,6 +107,37 @@ def test_interrupted_repair_keeps_built_candidate_accessible(status: str, tmp_pa
         assert client.get("/api/d2c/v1/runs/run_test/export").status_code == 409
 
 
+def test_failed_repair_can_recover_previous_built_candidate(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    candidate = tmp_path / "runs" / "run_test" / "candidate"
+    candidate.mkdir(parents=True)
+    (candidate / "package.json").write_text('{"name":"original"}', encoding="utf-8")
+    previous: dict[str, Any] = {"candidate_name": "candidate", "files": [{"path": "src/App.tsx", "content": "original"}],
+                "checks": [{"id": "build", "status": "PASS"}]}
+    run: dict[str, Any] = {"status": "FAILED", "result": {"candidate_name": "candidate-2", "files": [{"path": "src/App.tsx", "content": "failed"}],
+                                          "checks": [{"id": "build", "status": "FAIL"}], "previous_candidate": previous},
+           "source_set_id": "set", "source_set_revision": 1, "source_set_hash": "hash",
+           "model_requests": 2, "error": "修改后构建失败"}
+    monkeypatch.setattr(d2c_routes, "read_run", lambda _id: run)
+    monkeypatch.setattr(d2c_routes, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
+    monkeypatch.setattr(d2c_routes, "get_source_set", lambda *_args: {"sources": []})
+    monkeypatch.setattr(d2c_routes, "preview_url", lambda _id, _settings, name: f"/{name}/")
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+    assert client.get("/api/d2c/v1/runs/run_test/preview").status_code == 409
+    assert client.get("/api/d2c/v1/runs/run_test/preview?version=previous").json() == {"url": "/candidate/"}
+    exported = client.get("/api/d2c/v1/runs/run_test/export?version=previous")
+    assert exported.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(exported.content)) as archive:
+        report = json.loads(archive.read("design2code-page/report.json"))
+        assert report["status"] == "FAILED" and report["candidate_version"] == "previous"
+        assert report["candidate_name"] == "candidate" and report["checks"][0]["status"] == "PASS"
+        assert b'original' in archive.read("design2code-page/package.json")
+    previous["checks"][0]["status"] = "FAIL"
+    assert client.get("/api/d2c/v1/runs/run_test/preview?version=previous").status_code == 409
+    assert client.get("/api/d2c/v1/runs/run_test/export?version=previous").status_code == 409
+
+
 @pytest.mark.parametrize("override", ["D2C_MODEL_REQUEST_LIMIT=3", "D2C_REPAIR_LIMIT=2", "D2C_AUTO_RETRY_LIMIT=1", "D2C_MODEL_REQUEST_LIMIT=-1"])
 def test_unsafe_request_settings_block_model(tmp_path: Path, monkeypatch: MonkeyPatch, override: str) -> None:
     env = tmp_path / ".env"

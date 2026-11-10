@@ -236,11 +236,22 @@ def _can_preview(run: dict[str, Any]) -> bool:
     )
 
 
+def _previous_built_run(run: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = run.get("result") or {}
+    previous: dict[str, Any] = result.get("previous_candidate") or {}
+    selected: dict[str, Any] = {**run, "result": previous}
+    if run["status"] not in {"READY_FOR_REVIEW", "COMPLETE_LOCAL", "FAILED", "UNKNOWN_EXTERNAL", "CANCELLED"} or not _has_built_candidate(selected):
+        raise HTTPException(409, "没有构建通过的修改前版本。")
+    return selected
+
+
 @router.get("/runs/{run_id}/preview")
-async def get_preview(run_id: str) -> dict[str, str]:
+async def get_preview(run_id: str, version: Literal["current", "previous"] = "current") -> dict[str, str]:
     run = read_run(run_id)
     if run is None:
         raise HTTPException(404, "找不到该任务。")
+    if version == "previous":
+        run = _previous_built_run(run)
     if not _can_preview(run):
         raise HTTPException(409, "构建通过后才能预览。")
     try:
@@ -342,10 +353,12 @@ async def visual_diff(run_id: str, input_id: str, viewport: Literal["desktop", "
 
 
 @router.get("/runs/{run_id}/export")
-async def export_run(run_id: str) -> StreamingResponse:
+async def export_run(run_id: str, version: Literal["current", "previous"] = "current") -> StreamingResponse:
     run = read_run(run_id)
     if run is None:
         raise HTTPException(404, "找不到该任务。")
+    if version == "previous":
+        run = _previous_built_run(run)
     if run["status"] not in {"READY_FOR_REVIEW", "COMPLETE_LOCAL", "FAILED"} and not (
         run["status"] in {"UNKNOWN_EXTERNAL", "CANCELLED"} and _has_built_candidate(run)
     ):
@@ -366,7 +379,8 @@ async def export_run(run_id: str) -> StreamingResponse:
         archive.writestr("design2code-page/README.md", "# Design2Code 页面\n\n使用 Node.js 和 pnpm，运行 `pnpm install --frozen-lockfile`，再运行 `pnpm dev`。\n")
         archive.writestr("design2code-page/report.json", json_encode({
             "run_id": run_id, "status": run["status"], "source_set_hash": run["source_set_hash"],
-            "model_requests": run["model_requests"], "checks": (run["result"] or {}).get("checks", []),
+            "model_requests": run["model_requests"], "candidate_version": version, "candidate_name": candidate_name,
+            "checks": (run["result"] or {}).get("checks", []),
             "cost_status": "UNKNOWN", "error": run["error"],
             "source_set": source_set,
         }))
