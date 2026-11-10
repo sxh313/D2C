@@ -414,7 +414,7 @@ export default function D2CWorkbench() {
 
   async function handleGenerate() {
     if (!images.length && !spec.trim() && !figma.trim() && !bundle) { setError("请至少添加一份设计资料。"); return; }
-    setBusy(true); setError(""); setSelectedFile(0); setPreview(""); setView("preview");
+    setBusy(true); setError(""); setSelectedFile(0); setView("preview");
     try {
       const sources: { input_id: string; role: string; scope: object; required: boolean }[] = [];
       const sourceIds: Record<string, string> = {};
@@ -459,7 +459,6 @@ export default function D2CWorkbench() {
 
   async function submitPendingRepair(pending: PendingRepair) {
     await request(`/runs/${pending.runId}/repair`, jsonPost({ instruction: pending.instruction }, { "Idempotency-Key": pending.key }));
-    setPreview("");
     // The same-key replay may refer to an already finished repair; read the current state.
     try { setRun(await request<Run>(`/runs/${pending.runId}`)); }
     catch {
@@ -471,6 +470,7 @@ export default function D2CWorkbench() {
       setLastRunError("");
     } catch { setLastRunError("浏览器无法保存最近任务记录，请复制当前任务 ID 以便恢复。"); }
     setPendingRepair(null);
+    setPreviewAttempt((attempt) => attempt + 1);
     setRepairInstruction("");
   }
 
@@ -519,7 +519,8 @@ export default function D2CWorkbench() {
     setBusy(true); setRestoreError(""); setRecentError("");
     try {
       const restored = await request<Run>(`/runs/${id}`);
-      setPreview(""); setSelectedFile(0); setView("preview"); setRun(restored);
+      setSelectedFile(0); setView("preview"); setRun(restored);
+      setPreviewAttempt((attempt) => attempt + 1);
       setLastRunError("");
       try { window.localStorage.setItem("d2c_last_run", restored.run_id); }
       catch { setLastRunError("浏览器无法保存最近任务记录，请复制当前任务 ID 以便恢复。"); }
