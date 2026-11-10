@@ -103,6 +103,8 @@ def test_manual_review_is_bound_to_candidate_and_does_not_change_checks(tmp_path
     url = "/api/d2c/v1/runs/run_review/manual-review"
     initial = client.get(url).json()
     assert initial["review"] is None
+    assert client.get(url, params={"candidate": "candidate"}).status_code == 200
+    assert client.get(url, params={"candidate": "candidate-2"}).status_code == 409
     review: dict[str, Any] = {"candidate_hash": initial["candidate_hash"], "visual": "PASS", "interaction": "FAIL", "note": "checked"}
     assert client.post(url, json=review).status_code == 200
     assert client.get(url).json()["review"]["interaction"] == "FAIL"
@@ -123,6 +125,7 @@ def test_manual_review_is_bound_to_candidate_and_does_not_change_checks(tmp_path
         result["files"][0]["content"] = "repaired"
         db.execute("UPDATE runs SET result_json=? WHERE id='run_review'", (json.dumps(result),))
     assert client.post(url, json=review).status_code == 409
+    assert client.get(url, params={"candidate": "candidate"}).status_code == 409
     assert client.get(url).json()["review"] is None
 
 

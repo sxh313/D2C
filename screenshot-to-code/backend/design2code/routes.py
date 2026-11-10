@@ -249,12 +249,14 @@ class ManualReviewRequest(BaseModel):
 
 
 @router.get("/runs/{run_id}/manual-review")
-async def get_manual_review(run_id: str) -> dict[str, Any]:
+async def get_manual_review(run_id: str, candidate: Literal["candidate", "candidate-2"] | None = None) -> dict[str, Any]:
     run = read_run(run_id)
     if run is None:
         raise HTTPException(404, "找不到该任务。")
     if not _has_built_candidate(run):
         raise HTTPException(409, "构建通过后才能记录人工复核。")
+    if candidate is not None and candidate != (run["result"] or {}).get("candidate_name", "candidate"):
+        raise HTTPException(409, "候选版本已变化，请刷新后重新复核。")
     candidate_hash = _review_hash(run["source_set_hash"], run["result"])
     with connect() as db:
         row = db.execute("SELECT data_json, created_at FROM manual_reviews WHERE run_id=? AND candidate_hash=?", (run_id, candidate_hash)).fetchone()

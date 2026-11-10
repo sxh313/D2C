@@ -148,7 +148,7 @@ function ManualReview({ runId, candidate }: { runId: string; candidate?: string 
   useEffect(() => {
     let active = true;
     setData(null); setVisual("NOT_REVIEWED"); setInteraction("NOT_REVIEWED"); setNote(""); setError("");
-    request<ManualReviewData>(`/runs/${runId}/manual-review`).then((value) => {
+    request<ManualReviewData>(`/runs/${runId}/manual-review?candidate=${encodeURIComponent(candidate || "candidate")}`).then((value) => {
       if (!active) return;
       setData(value); setVisual(value.review?.visual || "NOT_REVIEWED"); setInteraction(value.review?.interaction || "NOT_REVIEWED"); setNote(value.review?.note || "");
     }).catch(() => { if (active) setError("无法读取人工复核记录，请刷新任务重试。"); });
