@@ -209,12 +209,19 @@ def request_repair(run_id: str, instruction: str, key: str) -> bool:
 
 
 async def execute_repair(run_id: str, instruction: str) -> None:
-    run = read_run(run_id)
-    if run is None or run["status"] != "REPAIRING" or not run["result"]:
-        return
-    original: dict[str, Any] = run["result"]
-    source_set = get_source_set(run["source_set_id"], run["source_set_revision"])
+    # Claim before making any external request. A durable unique claim prevents
+    # duplicate background executions, including across processes and restarts.
+    with connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+        if row is None or row["status"] != "REPAIRING" or not row["result_json"]:
+            return
+        claimed = db.execute("INSERT OR IGNORE INTO repair_execution_claims VALUES (?, ?)", (run_id, now()))
+        if not claimed.rowcount:
+            return
     try:
+        original: dict[str, Any] = json.loads(row["result_json"])
+        source_set = get_source_set(row["set_id"], row["revision"])
         if source_set is None:
             raise ProviderError("INPUT_MISSING", "任务资料不存在。")
         feedback = json_encode({"instruction": instruction, "files": original["files"],

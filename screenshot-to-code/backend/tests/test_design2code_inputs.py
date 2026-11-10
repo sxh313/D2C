@@ -77,6 +77,47 @@ async def test_failed_build_report_distinguishes_unrun_checks(tmp_path: Path, mo
     assert checks == {"build": "FAIL", "visual": "NOT_RUN", "interactions": "NOT_RUN", "manual_review": "NOT_RUN"}
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("interrupt", ["none", "stop", "restart"])
+async def test_repair_execution_claim_prevents_duplicate_model_calls(tmp_path: Path, monkeypatch: MonkeyPatch, interrupt: str) -> None:
+    monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
+    monkeypatch.setattr(runs, "get_settings", lambda: SimpleNamespace(model_ready=True, token_limit=None,
+        cost_limit_micro_usd=None, model_request_limit=2, repair_limit=1))
+    monkeypatch.setattr(runs, "get_source_set", lambda *_args: {})
+    monkeypatch.setattr(runs, "build_candidate", lambda *_args: {"status": "FAIL", "message": "build failed"})
+    started, release = asyncio.Event(), asyncio.Event()
+    calls = 0
+
+    async def fake_generate(*_args: Any, **_kwargs: Any) -> tuple[str, dict[str, Any]]:
+        nonlocal calls
+        calls += 1
+        started.set()
+        await release.wait()
+        return ('{"files":[{"path":"src/App.tsx","content":"app"},{"path":"src/index.css","content":""}]}', {})
+
+    monkeypatch.setattr(runs, "generate", fake_generate)
+    with storage.connect() as db:
+        db.execute("INSERT INTO runs (id,set_id,revision,source_hash,idempotency_key,request_hash,status,calls,result_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                   ("run_claim", "set", 1, "hash", "claim-key", "hash", "READY_FOR_REVIEW", 1,
+                    '{"files":[]}', storage.now(), storage.now()))
+    assert runs.request_repair("run_claim", "change", "repair-key") is True
+    assert runs.request_repair("run_claim", "change", "repair-key") is False
+    first = asyncio.create_task(runs.execute_repair("run_claim", "change"))
+    await started.wait()
+    await asyncio.gather(*(runs.execute_repair("run_claim", "change") for _ in range(3)))
+    if interrupt == "stop":
+        assert runs.cancel_run("run_claim")["status"] == "UNKNOWN_EXTERNAL"
+    elif interrupt == "restart":
+        runs.recover_interrupted_runs()
+    release.set()
+    await first
+    await runs.execute_repair("run_claim", "change")
+    run = runs.read_run("run_claim")
+    assert run is not None and run["model_requests"] == 2 and run["repairs"] == 1
+    assert run["status"] == ("FAILED" if interrupt == "none" else "UNKNOWN_EXTERNAL")
+    assert calls == 1
+
+
 def test_storage_closes_connection_and_rolls_back(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
     with pytest.raises(ValueError):

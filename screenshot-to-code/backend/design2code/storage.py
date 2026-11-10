@@ -46,6 +46,9 @@ def _open_connection() -> sqlite3.Connection:
             idempotency_key TEXT PRIMARY KEY, run_id TEXT NOT NULL,
             request_hash TEXT NOT NULL, created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS repair_execution_claims (
+            run_id TEXT PRIMARY KEY, claimed_at TEXT NOT NULL
+        );
     """)
     return db
 
