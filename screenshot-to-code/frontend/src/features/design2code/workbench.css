@@ -95,3 +95,15 @@
 .d2c-result > details + .d2c-empty, .d2c-result > details + .d2c-result-content { margin-top: 16px; }
 .d2c-help button { color: #286b92; background: #eef6f9; border: 1px solid #c9dfe8; border-radius: 6px; padding: 6px 10px; font-weight: 600; cursor: pointer; }
 .d2c-help button:disabled { opacity: .6; cursor: wait; }
+
+.d2c-result > details input:not([type=file]) { width: min(100%, 440px); padding: 9px 11px; border: 1px solid #cddde5; border-radius: 7px; color: #314c5d; font: inherit; }
+.d2c-result > details button { margin: 8px 8px 0 0; padding: 8px 11px; border: 1px solid #c9dfe8; border-radius: 6px; background: #eef6f9; color: #285e83; font: inherit; cursor: pointer; }
+.d2c-result > details button:disabled { opacity: .55; cursor: not-allowed; }
+.d2c-result > details ul { padding-left: 20px; overflow-wrap: anywhere; }
+.d2c-run-meta { flex-wrap: wrap; gap: 6px 12px; overflow-wrap: anywhere; }
+.d2c-result-actions { flex-wrap: wrap; }
+.d2c-result-actions a { margin-left: 0; }
+.d2c-result-actions a:last-child { margin-left: auto; }
+.d2c-check-results { margin-top: 20px; padding: 16px; border: 1px solid #dce8ed; border-radius: 8px; background: #f7fafb; scroll-margin-top: 16px; }
+.d2c-check-results h3 { margin: 0 0 12px; font-size: 14px; color: #314c5d; }
+.d2c-check { color: #405e6d; line-height: 1.6; }
