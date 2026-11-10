@@ -175,16 +175,20 @@ function ManualReview({ runId, candidate }: { runId: string; candidate?: string 
   async function save() {
     if (!data) return;
     setBusy(true); setError("");
-    try { setData(await request<ManualReviewData>(`/runs/${runId}/manual-review`, jsonPost({ candidate_hash: data.candidate_hash, visual, interaction, note }))); }
+    try {
+      const saved = await request<ManualReviewData>(`/runs/${runId}/manual-review`, jsonPost({ candidate_hash: data.candidate_hash, visual, interaction, note }));
+      setData(saved); setVisual(saved.review?.visual || "NOT_REVIEWED"); setInteraction(saved.review?.interaction || "NOT_REVIEWED"); setNote(saved.review?.note || "");
+    }
     catch (caught) { setError(caught instanceof Error ? caught.message : "保存失败，请重试。"); }
     finally { setBusy(false); }
   }
+  const dirty = !!data && (visual !== (data.review?.visual || "NOT_REVIEWED") || interaction !== (data.review?.interaction || "NOT_REVIEWED") || note !== (data.review?.note || ""));
   return <section className="d2c-check-results" aria-label="人工复核"><h3>人工复核</h3>
     <p className="d2c-help">查看页面后记录本次判断；记录只属于当前候选，不会覆盖自动检查或改变任务状态。</p>
     {([ ["视觉还原", visual, setVisual], ["需求和交互", interaction, setInteraction] ] as const).map(([label, value, update]) => <label key={label}>{label} <select value={value} onChange={(event) => update(event.target.value as ManualVerdict)} disabled={!data || busy}><option value="NOT_REVIEWED">未检查</option><option value="PASS">人工通过</option><option value="FAIL">需要修改</option></select> </label>)}
     <label>复核备注<textarea rows={2} maxLength={2000} value={note} onChange={(event) => setNote(event.target.value)} disabled={!data || busy} placeholder="记录检查过的内容、差异或未检查范围" /></label>
     <button type="button" disabled={!data || busy} onClick={() => void save()}>{busy ? "保存中…" : "保存人工复核"}</button>
-    {data?.review && <p role="status">已保存于 {new Date(data.review.created_at).toLocaleString()}；修改后请再次保存。</p>}
+    {dirty ? <p role="status">有未保存的复核修改，请点击“保存人工复核”。</p> : data?.review ? <p role="status">当前复核已保存于 {new Date(data.review.created_at).toLocaleString()}。</p> : null}
     {error && <p role="alert">{error}</p>}
   </section>;
 }
