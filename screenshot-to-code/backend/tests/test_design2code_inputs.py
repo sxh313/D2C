@@ -91,6 +91,20 @@ def test_dialog_rule_is_validated_and_frozen(tmp_path: Path, monkeypatch: Monkey
     assert client.post("/api/d2c/v1/source-sets", json={**body, "dialog_check": {**rule, "dialog_name": "  "}}).status_code == 422
 
 
+def test_tab_rule_is_validated_and_frozen(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+    item = client.post("/api/d2c/v1/design-inputs", json={"input_type": "spec", "content": "制作标签页"}).json()
+    rule = {"tab_name": "已完成", "initial_text": "待办任务", "selected_text": "完成任务"}
+    body: dict[str, Any] = {"sources": [{"input_id": item["input_id"]}], "tab_check": rule}
+    created = client.post("/api/d2c/v1/source-sets", json=body)
+    assert created.status_code == 200 and created.json()["tab_check"] == rule
+    assert client.get(f"/api/d2c/v1/source-sets/{created.json()['source_set_id']}").json()["tab_check"] == rule
+    assert client.post("/api/d2c/v1/source-sets", json={**body, "tab_check": {**rule, "selected_text": rule["initial_text"]}}).status_code == 422
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("payload, expected", [({"data": [{}]}, "connected"), ({"data": []}, "no_session"), ({"error": "failed"}, "unavailable")])
 async def test_figma_connection_status(monkeypatch: MonkeyPatch, payload: dict[str, Any], expected: str) -> None:
@@ -645,6 +659,26 @@ async def test_preview_selection_intercepts_click_without_changing_exported_html
                 assert (dist / "index.html").read_text(encoding="utf-8") == original
             finally:
                 await browser.close()
+    finally:
+        runner.close_previews()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("works", [True, False])
+async def test_declared_tab_checks_state_and_content(tmp_path: Path, monkeypatch: MonkeyPatch, works: bool) -> None:
+    settings: Any = SimpleNamespace(runtime_dir=tmp_path, preview_host="127.0.0.1", preview_port_start=0, preview_port_end=0)
+    monkeypatch.setattr(runner, "get_settings", lambda: settings)
+    monkeypatch.setattr(inspection, "get_settings", lambda: settings)
+    runner.close_previews()
+    dist = tmp_path / "runs" / "run_tab" / "candidate" / "dist"
+    dist.mkdir(parents=True)
+    (dist / "index.html").write_text('<link rel="icon" href="data:,"><button role="tab" aria-selected="false">Done</button><div id="initial">Pending</div><div id="selected" hidden>Finished</div><script src="./app.js"></script>', encoding="utf-8")
+    (dist / "app.js").write_text("document.querySelector('[role=tab]').onclick=e=>{e.target.setAttribute('aria-selected','true');" + ("document.querySelector('#initial').hidden=true;document.querySelector('#selected').hidden=false;" if works else "") + "};", encoding="utf-8")
+    try:
+        result = await inspection.inspect_tab("run_tab", "candidate", {"tab_name": "Done", "initial_text": "Pending", "selected_text": "Finished"})
+        assert result["status"] == ("PASS" if works else "FAIL"), result
+        if not works:
+            assert "检查切换后内容" in result["message"]
     finally:
         runner.close_previews()
 

@@ -114,6 +114,12 @@ class DialogCheck(BaseModel):
     close_button: str = Field(min_length=1, max_length=100)
 
 
+class TabCheck(BaseModel):
+    tab_name: str = Field(min_length=1, max_length=100)
+    initial_text: str = Field(min_length=1, max_length=150)
+    selected_text: str = Field(min_length=1, max_length=150)
+
+
 class SourceSetRequest(BaseModel):
     sources: list[SourceReference] = Field(min_length=1, max_length=6)
     instructions: str = Field(default="", max_length=30_000)
@@ -121,10 +127,15 @@ class SourceSetRequest(BaseModel):
     resolutions: list[dict[str, Any]] = Field(default_factory=lambda: [])
     search_check: SearchCheck | None = None
     dialog_check: DialogCheck | None = None
+    tab_check: TabCheck | None = None
 
 
 @router.post("/source-sets")
 async def create_source_set(request: SourceSetRequest) -> dict[str, Any]:
+    if request.tab_check:
+        fields = request.tab_check.model_dump()
+        if any(not value.strip() or value != value.strip() for value in fields.values()) or fields["initial_text"] == fields["selected_text"]:
+            raise HTTPException(422, "标签页验收字段不能留空或包含首尾空格，两条内容必须不同。")
     if request.dialog_check and any(not value.strip() or value != value.strip() for value in request.dialog_check.model_dump().values()):
         raise HTTPException(422, "弹窗验收字段不能留空或包含首尾空格。")
     if request.search_check:

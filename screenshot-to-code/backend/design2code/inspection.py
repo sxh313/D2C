@@ -116,6 +116,51 @@ async def inspect_dialog(run_id: str, candidate: str, rule: dict[str, str]) -> d
         return {"id": "spec_dialog_01", "status": "NOT_RUN", "message": "弹窗验收未能运行；请检查本机浏览器和预览。"}
 
 
+async def inspect_tab(run_id: str, candidate: str, rule: dict[str, str]) -> dict[str, Any]:
+    """Verify one declared tab switch and its two example contents."""
+    stage = "加载页面"
+    try:
+        url = preview_url(run_id, get_settings(), candidate)
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(headless=True, env=dict(_child_env()))
+            try:
+                page = await browser.new_page(viewport={"width": 1280, "height": 800})
+                errors: set[str] = set()
+                page.on("pageerror", lambda _error: errors.add("页面脚本报错"))
+                page.on("console", lambda message: errors.add("页面或资源报错") if message.type == "error" else None)
+                await _watch_resources(page, url, errors)
+                response = await page.goto(url, wait_until="load", timeout=15000)
+                if response is None:
+                    raise RuntimeError("Preview did not respond")
+                if not response.ok:
+                    return {"id": "spec_tab_01", "status": "FAIL", "message": "标签页验收失败：预览页面返回错误状态。"}
+                tab = page.get_by_role("tab", name=rule["tab_name"], exact=True)
+                initial = page.get_by_text(rule["initial_text"], exact=True)
+                selected = page.get_by_text(rule["selected_text"], exact=True)
+                stage = "查找标签"
+                await expect(tab).to_have_count(1, timeout=3000)
+                stage = "检查初始内容"
+                await expect(initial).to_have_count(1, timeout=3000)
+                await expect(initial).to_be_visible(timeout=3000)
+                await expect(selected).to_be_hidden(timeout=3000)
+                stage = "切换标签"
+                await tab.click(timeout=3000)
+                await expect(tab).to_have_attribute("aria-selected", "true", timeout=3000)
+                stage = "检查切换后内容"
+                await expect(initial).to_be_hidden(timeout=3000)
+                await expect(selected).to_have_count(1, timeout=3000)
+                await expect(selected).to_be_visible(timeout=3000)
+                if errors:
+                    return {"id": "spec_tab_01", "status": "FAIL", "message": "标签页验收发现页面或资源错误。"}
+                return {"id": "spec_tab_01", "status": "PASS", "message": "标签页验收通过：指定标签切换后内容符合规则；仅覆盖这一组示例。"}
+            finally:
+                await browser.close()
+    except (PlaywrightTimeoutError, AssertionError):
+        return {"id": "spec_tab_01", "status": "FAIL", "message": f"标签页验收失败：{stage}未符合规则，请检查名称、内容和唯一性。"}
+    except Exception:
+        return {"id": "spec_tab_01", "status": "NOT_RUN", "message": "标签页验收未能运行；请检查本机浏览器和预览。"}
+
+
 async def capture_reference_viewport(run_id: str, candidate: str, width: int, height: int) -> tuple[bytes, list[str]]:
     """Capture only the initial viewport, using the reference image dimensions."""
     settings = get_settings()
