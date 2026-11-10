@@ -49,6 +49,17 @@ def test_generated_jsx_root_image_src_uses_relative_path() -> None:
     assert files[1]["content"] == payload["files"][1]["content"]
 
 
+def test_generated_css_public_images_use_vite_public_path() -> None:
+    css = 'a{background:url("./images/a.png")} b{background:URL( ./images/b.png )} c{background:url("https://example.test/c.png")} d{background:url("../images/d.png")}'
+    payload = {"files": [{"path": "src/App.tsx", "content": "export default 1"},
+                         {"path": "src/index.css", "content": css}]}
+    result = runs.parse_files(json.dumps(payload))[1]["content"]
+    assert 'url("/images/a.png")' in result
+    assert 'URL( /images/b.png )' in result
+    assert 'url("https://example.test/c.png")' in result
+    assert 'url("../images/d.png")' in result
+
+
 def test_saved_source_download_without_candidate_directory(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
     app = FastAPI()

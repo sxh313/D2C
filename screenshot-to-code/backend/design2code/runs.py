@@ -147,6 +147,10 @@ def parse_files(text: str) -> list[dict[str, str]]:
         # src values bypass that prefix. Preserve other code and URLs.
         if path.endswith(".tsx"):
             content = re.sub(r"(\bsrc\s*=\s*[\"'])/images/", r"\1./images/", content)
+        elif path.endswith(".css"):
+            # Vite resolves public assets in CSS from /images/ and rewrites them
+            # for its configured base; ./images/ would resolve below assets/.
+            content = re.sub(r"(url\(\s*[\"']?)\./images/", r"\1/images/", content, flags=re.IGNORECASE)
         output.append({"path": path, "content": content})
     if len(output) > 40 or not {"src/App.tsx", "src/index.css"}.issubset(seen):
         raise ProviderError("GENERATION_INVALID", "生成结果缺少 App.tsx 或 index.css。")
