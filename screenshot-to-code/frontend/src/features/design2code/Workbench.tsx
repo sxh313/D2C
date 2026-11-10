@@ -284,6 +284,7 @@ export default function D2CWorkbench() {
   const [draftStorageAvailable, setDraftStorageAvailable] = useState(true);
   const draftWrites = useRef<Promise<void>>(Promise.resolve());
   const imagesRef = useRef<ImageInput[]>([]);
+  const pendingPastedFiles = useRef<File[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<HTMLIFrameElement>(null);
   const selectionToken = useRef("");
@@ -342,11 +343,21 @@ export default function D2CWorkbench() {
     const handlePaste = (event: ClipboardEvent) => {
       const files = Array.from(event.clipboardData?.items || []).filter((item) => item.type.startsWith("image/"))
         .map((item) => item.getAsFile()).filter((file): file is File => file !== null);
-      if (files.length) { event.preventDefault(); void addImages(files); }
+      if (files.length) {
+        event.preventDefault();
+        if (draftReady) void addImages(files);
+        else pendingPastedFiles.current.push(...files);
+      }
     };
     document.addEventListener("paste", handlePaste);
     return () => document.removeEventListener("paste", handlePaste);
-  }, [addImages]);
+  }, [addImages, draftReady]);
+
+  useEffect(() => {
+    if (!draftReady || pendingPastedFiles.current.length === 0) return;
+    const files = pendingPastedFiles.current.splice(0);
+    void addImages(files);
+  }, [addImages, draftReady]);
 
   useEffect(() => {
     // Avoid navigating away and losing the current task when a file misses the drop zone.
