@@ -764,6 +764,23 @@ async def test_interaction_smoke_without_supported_controls_is_not_run(tmp_path:
 
 
 @pytest.mark.asyncio
+async def test_interaction_smoke_hidden_file_input_is_not_a_completed_upload(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    settings: Any = SimpleNamespace(runtime_dir=tmp_path, preview_host="127.0.0.1", preview_port_start=0, preview_port_end=0)
+    monkeypatch.setattr(runner, "get_settings", lambda: settings)
+    monkeypatch.setattr(inspection, "get_settings", lambda: settings)
+    runner.close_previews()
+    dist = tmp_path / "runs" / "run_hidden_upload" / "candidate" / "dist"
+    dist.mkdir(parents=True)
+    (dist / "index.html").write_text("<input id='upload' type='file' hidden><button id='choose'>上传</button><script src='./app.js'></script>", encoding="utf-8")
+    (dist / "app.js").write_text("document.getElementById('choose').addEventListener('click', () => document.getElementById('upload').click())", encoding="utf-8")
+    try:
+        result = await inspection.inspect_interactions("run_hidden_upload", "candidate")
+        assert result["status"] == "NOT_RUN" and "未选择文件的上传操作" in result["message"], result
+    finally:
+        runner.close_previews()
+
+
+@pytest.mark.asyncio
 async def test_interaction_smoke_exercises_checkable_and_submit_inputs(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     settings: Any = SimpleNamespace(runtime_dir=tmp_path, preview_host="127.0.0.1", preview_port_start=0, preview_port_end=0)
     monkeypatch.setattr(runner, "get_settings", lambda: settings)

@@ -154,8 +154,10 @@ async def inspect_interactions(run_id: str, candidate: str) -> dict[str, Any]:
                 page = await browser.new_page(viewport={"width": 1280, "height": 800})
                 errors: list[str] = []
                 resource_errors: set[str] = set()
+                file_choosers: list[bool] = []
                 page.on("pageerror", lambda error: errors.append(str(error)))
                 page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+                page.on("filechooser", lambda _chooser: file_choosers.append(True))
                 await _watch_resources(page, url, resource_errors)
                 response = await page.goto(url, wait_until="load", timeout=15000)
                 if response is None:
@@ -180,8 +182,10 @@ async def inspect_interactions(run_id: str, candidate: str) -> dict[str, Any]:
                             continue
                         tag = await locator.evaluate("element => element.tagName.toLowerCase()")
                         acted = False
+                        chooser_count = len(file_choosers)
                         if tag == "button":
                             await locator.click(timeout=3000)
+                            await page.wait_for_timeout(200)
                             acted = True
                         elif tag in {"input", "textarea"}:
                             input_type = await locator.get_attribute("type")
@@ -190,6 +194,7 @@ async def inspect_interactions(run_id: str, candidate: str) -> dict[str, Any]:
                                 acted = True
                             elif input_type in {"submit", "button", "reset", "image"}:
                                 await locator.click(timeout=3000)
+                                await page.wait_for_timeout(200)
                                 acted = True
                             elif input_type in {None, "text", "search", "email", "password", "tel", "url"} or tag == "textarea":
                                 await locator.fill("smoke", timeout=3000)
@@ -201,7 +206,10 @@ async def inspect_interactions(run_id: str, candidate: str) -> dict[str, Any]:
                                 if value is not None:
                                     await locator.select_option(value, timeout=3000)
                                     acted = True
-                        if acted:
+                        if len(file_choosers) > chooser_count:
+                            # Clicking an upload button is not an upload check.
+                            incomplete += 1
+                        elif acted:
                             exercised += 1
                         else:
                             # A visible enabled control we cannot safely exercise is
@@ -215,7 +223,8 @@ async def inspect_interactions(run_id: str, candidate: str) -> dict[str, Any]:
                 if errors:
                     return {"id": "interaction_smoke", "status": "FAIL", "message": "交互冒烟检查发现页面错误：" + "；".join(errors[:3])}
                 if incomplete or controls > 30:
-                    return {"id": "interaction_smoke", "status": "NOT_RUN", "message": f"交互冒烟检查不完整：已尝试 {exercised} 个控件，{incomplete} 个控件操作未完成；最多检查前 30 个控件，请人工检查。"}
+                    upload_note = "包含未选择文件的上传操作；" if file_choosers else ""
+                    return {"id": "interaction_smoke", "status": "NOT_RUN", "message": f"交互冒烟检查不完整：已尝试 {exercised} 个控件，{incomplete} 个控件操作未完成；{upload_note}最多检查前 30 个控件，请人工检查。"}
                 if not exercised:
                     return {"id": "interaction_smoke", "status": "NOT_RUN", "message": "没有可操作的控件，未执行交互冒烟检查。"}
                 return {"id": "interaction_smoke", "status": "PASS", "message": f"交互冒烟检查通过，已尝试 {exercised} 个控件；不代表业务逻辑验收通过。"}
