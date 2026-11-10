@@ -550,6 +550,28 @@ async def test_figma_mcp_import_converts_node_and_png(tmp_path: Path, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_figma_mcp_stale_binding_explains_rebinding(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return json.dumps({"node": {"isError": True, "content": [{"type": "text", "text": "No plugin connected for fileKey old"}]}}).encode(), b""
+
+    async def fake_exec(*_args: Any, **_kwargs: Any) -> FakeProcess:
+        return FakeProcess()
+
+    env = tmp_path / ".env"
+    env.write_text("D2C_FIGMA_MCP_BOUND_FILE_KEY=Abc123\nD2C_FIGMA_MCP_SESSION_KEY=unsaved-old\n", encoding="utf-8")
+    (tmp_path / "bridge-client.mjs").write_text("", encoding="utf-8")
+    monkeypatch.setattr(inputs, "ENV_FILE", env)
+    monkeypatch.setattr(inputs, "get_settings", lambda: SimpleNamespace(figma_bridge_client=tmp_path / "bridge-client.mjs"))
+    monkeypatch.setattr(inputs.shutil, "which", lambda _name: "node")
+    monkeypatch.setattr(inputs.asyncio, "create_subprocess_exec", fake_exec)
+    with pytest.raises(HTTPException, match="Bind-FigmaBridge.ps1"):
+        await inputs.import_figma_mcp("https://www.figma.com/design/Abc123/test?node-id=1-2")
+
+
+@pytest.mark.asyncio
 async def test_figma_mcp_import_reports_bridge_tool_error(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     class FakeProcess:
         returncode = 0

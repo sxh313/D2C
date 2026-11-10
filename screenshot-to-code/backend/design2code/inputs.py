@@ -308,6 +308,8 @@ async def import_figma_mcp(url: str) -> dict[str, Any]:
         bridge_errors = [_mcp_error(payload.get(key)) for key in ("node", "screenshot")]
         bridge_errors = [message for message in bridge_errors if message]
         if bridge_errors:
+            if session_key and "No plugin connected for fileKey" in bridge_errors[0]:
+                raise HTTPException(503, "Figma 插件会话已变化或断开。请确认目标文件已打开、Bridge 插件已连接，然后在项目目录重新运行 Bind-FigmaBridge.ps1 并提供该 Figma 链接。")
             raise HTTPException(503, f"Figma MCP Bridge 未连接或节点不可用：{bridge_errors[0]}")
         node_result = _mcp_content(payload.get("node"))
         screenshot_result = _mcp_content(payload.get("screenshot"))
