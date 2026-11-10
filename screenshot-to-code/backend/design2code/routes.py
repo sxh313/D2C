@@ -101,15 +101,27 @@ class SourceReference(BaseModel):
     required: bool = True
 
 
+class SearchCheck(BaseModel):
+    placeholder: str = Field(min_length=1, max_length=100)
+    query: str = Field(min_length=1, max_length=100)
+    visible_text: str = Field(min_length=1, max_length=150)
+    hidden_text: str = Field(min_length=1, max_length=150)
+
+
 class SourceSetRequest(BaseModel):
     sources: list[SourceReference] = Field(min_length=1, max_length=6)
     instructions: str = Field(default="", max_length=30_000)
     authority_by_dimension: dict[str, str] = Field(default_factory=dict)
     resolutions: list[dict[str, Any]] = Field(default_factory=lambda: [])
+    search_check: SearchCheck | None = None
 
 
 @router.post("/source-sets")
 async def create_source_set(request: SourceSetRequest) -> dict[str, Any]:
+    if request.search_check:
+        fields = request.search_check.model_dump()
+        if any(not value.strip() or value != value.strip() for value in fields.values()) or fields["visible_text"] == fields["hidden_text"]:
+            raise HTTPException(422, "搜索验收的字段不能留空或包含首尾空格，两条示例文本必须不同。")
     ids = [source.input_id for source in request.sources]
     if len(ids) != len(set(ids)):
         raise HTTPException(422, "同一份资料不能重复添加。")

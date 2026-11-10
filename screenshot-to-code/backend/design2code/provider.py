@@ -63,7 +63,7 @@ def _materials(source_set: dict[str, Any]) -> tuple[str, list[str]]:
         summaries.append(summary)
     context = json_encode({"instructions": source_set["instructions"],
                            "authority_by_dimension": source_set["authority_by_dimension"],
-                           "resolutions": source_set["resolutions"], "sources": summaries})
+                           "resolutions": source_set["resolutions"], "search_check": source_set.get("search_check"), "sources": summaries})
     if len(context.encode("utf-8")) > 1_000_000:
         raise ProviderError("INPUT_TOO_LARGE", "设计资料过大，请缩小 Figma 节点或 Spec 范围。")
     return context, images

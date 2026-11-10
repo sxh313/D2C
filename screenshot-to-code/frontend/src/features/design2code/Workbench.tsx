@@ -14,7 +14,9 @@ type Dimension = "layout" | "style" | "content" | "behavior";
 type SelectedElement = { html: string; context: string; label: string };
 
 
-type Draft = { images: ImageInput[]; spec: string; figma: string; bundle: ImageInput | null; instruction: string; authority: Record<Dimension, string> };
+type SearchRule = { placeholder: string; query: string; visible_text: string; hidden_text: string };
+const emptySearchRule: SearchRule = { placeholder: "", query: "", visible_text: "", hidden_text: "" };
+type Draft = { images: ImageInput[]; spec: string; figma: string; bundle: ImageInput | null; instruction: string; authority: Record<Dimension, string>; searchRule?: SearchRule };
 
 function openDraftDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -235,6 +237,7 @@ function VisualReview({ runId, candidate }: { runId: string; candidate?: string 
 export default function D2CWorkbench() {
   const [images, setImages] = useState<ImageInput[]>([]);
   const [spec, setSpec] = useState("");
+  const [searchRule, setSearchRule] = useState<SearchRule>(emptySearchRule);
   const [figma, setFigma] = useState("");
   const [figmaConnection, setFigmaConnection] = useState("");
   const [figmaChecking, setFigmaChecking] = useState(false);
@@ -286,6 +289,7 @@ export default function D2CWorkbench() {
       imagesRef.current = draft.images || [];
       setImages(imagesRef.current);
       setSpec(draft.spec || "");
+      setSearchRule(draft.searchRule || emptySearchRule);
       setFigma(draft.figma || "");
       setBundle(draft.bundle || null);
       setInstruction(draft.instruction || "");
@@ -297,13 +301,13 @@ export default function D2CWorkbench() {
 
   useEffect(() => {
     if (!draftReady || !draftStorageAvailable) return;
-    const draft: Draft = { images, spec, figma, bundle, instruction, authority };
+    const draft: Draft = { images, spec, figma, bundle, instruction, authority, searchRule };
     const timer = window.setTimeout(() => {
       draftWrites.current = draftWrites.current.catch(() => {}).then(() => writeDraft(draft));
       void draftWrites.current.then(() => setDraftError("")).catch(() => setDraftError("草稿保存失败，请检查浏览器存储空间。"));
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [draftReady, draftStorageAvailable, images, spec, figma, bundle, instruction, authority]);
+  }, [draftReady, draftStorageAvailable, images, spec, figma, bundle, instruction, authority, searchRule]);
 
   const addImages = useCallback(async (files: File[]) => {
     if (!files.length) return;
@@ -502,6 +506,8 @@ export default function D2CWorkbench() {
 
   async function handleGenerate() {
     if (!images.length && !spec.trim() && !figma.trim() && !bundle) { setError("请至少添加一份设计资料。"); return; }
+    const searchValues = Object.values(searchRule).map((value) => value.trim());
+    if (searchValues.some(Boolean) && (searchValues.some((value) => !value) || searchValues[2] === searchValues[3])) { setError("搜索验收请填写全部四项，且两条示例文本必须不同。"); return; }
     setBusy(true); setError(""); setSelectedFile(0); setView("preview");
     try {
       const sources: { input_id: string; role: string; scope: object; required: boolean }[] = [];
@@ -532,7 +538,8 @@ export default function D2CWorkbench() {
         else if (choice && sourceIds[choice]) authorityByDimension[dimension] = sourceIds[choice];
         else if (choice) throw new Error("来源规则引用的资料已移除，请重新选择。");
       }
-      const sourceSet = await request<SourceSet>("/source-sets", jsonPost({ sources, instructions: instruction, authority_by_dimension: authorityByDimension }));
+      const searchCheck = searchValues.some(Boolean) ? { placeholder: searchValues[0], query: searchValues[1], visible_text: searchValues[2], hidden_text: searchValues[3] } : null;
+      const sourceSet = await request<SourceSet>("/source-sets", jsonPost({ sources, instructions: instruction, authority_by_dimension: authorityByDimension, search_check: searchCheck }));
       await request(`/source-sets/${sourceSet.source_set_id}/confirm`, jsonPost(sourceSet));
       const pending = { sourceSet, key: crypto.randomUUID() };
       // Store before sending: a lost response can then be recovered with the same key.
@@ -643,6 +650,9 @@ export default function D2CWorkbench() {
         {imageError && <div className="d2c-error" role="alert">{imageError}</div>}
         {images.length > 0 && <div className="d2c-thumbnails">{images.map((image, index) => <div className="d2c-thumb" key={`${image.name}-${index}`}><img src={image.data} alt={image.name} /><button type="button" aria-label={`移除 ${image.name}`} onClick={() => { imagesRef.current = imagesRef.current.filter((_, i) => i !== index); setImages(imagesRef.current); }}><LuX /></button></div>)}</div>}
         <label className="d2c-label" htmlFor="d2c-spec">需求 Spec <span>文字或 Markdown</span></label><textarea id="d2c-spec" value={spec} onChange={(event) => setSpec(event.target.value)} placeholder={'例如：任务列表支持搜索、状态筛选和新建弹窗。'} rows={4} />
+        <details><summary>搜索功能验收（可选）</summary><p className="d2c-help">在生成前填写一组可验证示例。两条文本初始都应显示；搜索后第一条保留、第二条隐藏。输入框提示文字和示例文本需与页面完全一致。此检查只覆盖这一组示例。</p>
+          {([["placeholder", "搜索框提示文字", "例如：搜索任务"], ["query", "要输入的搜索词", "例如：邮件"], ["visible_text", "搜索后保留的完整文本", "例如：查看邮件"], ["hidden_text", "搜索后隐藏的完整文本", "例如：整理文件"]] as const).map(([key, label, example]) => <label className="d2c-label" key={key}>{label}<input value={searchRule[key]} maxLength={key === "visible_text" || key === "hidden_text" ? 150 : 100} placeholder={example} onChange={(event) => setSearchRule((current) => ({ ...current, [key]: event.target.value }))} /></label>)}
+        </details>
         <label className="d2c-label" htmlFor="d2c-figma">Figma 节点链接 <span>{!capabilities ? "正在检查配置" : capabilities.figma_mode === "mcp" ? (capabilities.figma_configured ? "MCP 模式；请在 Figma 中运行插件" : "请先安装 MCP Bridge") : (capabilities.figma_configured ? "REST 令牌已配置" : "需要配置访问令牌")}</span></label><input id="d2c-figma" value={figma} onChange={(event) => setFigma(event.target.value)} placeholder="https://www.figma.com/design/…?node-id=…" />
         {capabilities?.figma_mode === "mcp" && <div className="d2c-help"><button type="button" disabled={figmaChecking} onClick={() => void checkFigmaConnection()}>{figmaChecking ? "正在检查…" : "检查 Figma 插件连接"}</button>{figmaConnection && <p role="status">{figmaConnection}</p>}</div>}
         <details className="d2c-advanced"><summary>更多参考资料：FigmaToCode 项目包</summary><label className="d2c-label" htmlFor="d2c-bundle">FigmaToCode 项目包 <span>可选 ZIP，最多 10 MiB</span></label>

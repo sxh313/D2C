@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from playwright.async_api import async_playwright
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError, async_playwright, expect
 
 from design2code.runner import _child_env, preview_url
 from design2code.settings import get_settings
@@ -20,6 +20,45 @@ async def _watch_resources(page: Any, url: str, problems: set[str]) -> None:
             await route.abort()
 
     await page.route("**/*", route_request)
+
+
+async def inspect_search(run_id: str, candidate: str, rule: dict[str, str]) -> dict[str, Any]:
+    """Verify the user's declared two-example search behavior, not arbitrary semantics."""
+    try:
+        url = preview_url(run_id, get_settings(), candidate)
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(headless=True, env=dict(_child_env()))
+            try:
+                page = await browser.new_page(viewport={"width": 1280, "height": 800})
+                errors: set[str] = set()
+                page.on("pageerror", lambda _error: errors.add("页面脚本报错"))
+                page.on("console", lambda message: errors.add("页面或资源报错") if message.type == "error" else None)
+                await _watch_resources(page, url, errors)
+                response = await page.goto(url, wait_until="load", timeout=15000)
+                if response is None:
+                    raise RuntimeError("Preview did not respond")
+                if not response.ok:
+                    return {"id": "spec_search_01", "status": "FAIL", "message": "搜索验收失败：预览页面返回错误状态。"}
+                field = page.get_by_placeholder(rule["placeholder"], exact=True)
+                shown = page.get_by_text(rule["visible_text"], exact=True)
+                hidden = page.get_by_text(rule["hidden_text"], exact=True)
+                if await field.count() != 1 or await shown.count() != 1 or await hidden.count() != 1:
+                    return {"id": "spec_search_01", "status": "FAIL", "message": "搜索验收失败：输入框或初始两条示例文本不存在或不唯一。"}
+                await expect(field).to_be_visible(timeout=3000)
+                await expect(shown).to_be_visible(timeout=3000)
+                await expect(hidden).to_be_visible(timeout=3000)
+                await field.fill(rule["query"], timeout=3000)
+                await expect(shown).to_be_visible(timeout=3000)
+                await expect(hidden).to_be_hidden(timeout=3000)
+                if errors:
+                    return {"id": "spec_search_01", "status": "FAIL", "message": "搜索验收发现页面或资源错误。"}
+                return {"id": "spec_search_01", "status": "PASS", "message": "搜索验收通过：输入指定内容后，保留和隐藏的示例均符合预先填写的规则；仅覆盖这一组示例。"}
+            finally:
+                await browser.close()
+    except (PlaywrightTimeoutError, AssertionError):
+        return {"id": "spec_search_01", "status": "FAIL", "message": "搜索验收失败：输入框或示例的显示状态不符合预先填写的规则。"}
+    except Exception:
+        return {"id": "spec_search_01", "status": "NOT_RUN", "message": "搜索验收未能运行；请检查本机浏览器和预览。"}
 
 
 async def capture_reference_viewport(run_id: str, candidate: str, width: int, height: int) -> tuple[bytes, list[str]]:

@@ -60,6 +60,23 @@ def test_visual_check_only_marks_proven_spec_only_inapplicable(monkeypatch: Monk
         assert runs._visual_check(source(*ids))["status"] == "NOT_RUN"
 
 
+def test_search_rule_is_validated_and_frozen_with_source_set(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+    item = client.post("/api/d2c/v1/design-inputs", json={"input_type": "spec", "content": "制作搜索列表"}).json()
+    rule = {"placeholder": "搜索", "query": "邮件", "visible_text": "查看邮件", "hidden_text": "整理文件"}
+    body: dict[str, Any] = {"sources": [{"input_id": item["input_id"]}], "search_check": rule}
+    created = client.post("/api/d2c/v1/source-sets", json=body)
+    assert created.status_code == 200
+    data = created.json()
+    assert data["search_check"] == rule
+    assert client.get(f"/api/d2c/v1/source-sets/{data['source_set_id']}").json()["search_check"] == rule
+    bad: dict[str, Any] = {**body, "search_check": {**rule, "hidden_text": rule["visible_text"]}}
+    assert client.post("/api/d2c/v1/source-sets", json=bad).status_code == 422
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("payload, expected", [({"data": [{}]}, "connected"), ({"data": []}, "no_session"), ({"error": "failed"}, "unavailable")])
 async def test_figma_connection_status(monkeypatch: MonkeyPatch, payload: dict[str, Any], expected: str) -> None:
@@ -338,7 +355,7 @@ def test_repair_checks_current_model_configuration(tmp_path: Path, monkeypatch: 
 async def test_failed_build_report_distinguishes_unrun_checks(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
     monkeypatch.setattr(runs, "get_settings", lambda: SimpleNamespace(model_request_limit=2))
-    monkeypatch.setattr(runs, "get_source_set", lambda *_args: {})
+    monkeypatch.setattr(runs, "get_source_set", lambda *_args: {"search_check": {"placeholder": "搜索", "query": "邮件", "visible_text": "查看邮件", "hidden_text": "整理文件"}})
     monkeypatch.setattr(runs, "build_candidate", lambda *_args: {"status": "FAIL", "message": "build failed"})
 
     async def fake_generate(_settings: Any, _source_set: Any) -> tuple[str, dict[str, Any]]:
@@ -352,7 +369,7 @@ async def test_failed_build_report_distinguishes_unrun_checks(tmp_path: Path, mo
     run = runs.read_run("run_failed_report")
     assert run is not None and run["status"] == "FAILED"
     checks = {check["id"]: check["status"] for check in run["result"]["checks"]}
-    assert checks == {"build": "FAIL", "visual": "NOT_RUN", "interactions": "NOT_RUN", "manual_review": "NOT_RUN"}
+    assert checks == {"build": "FAIL", "visual": "NOT_RUN", "interactions": "NOT_RUN", "manual_review": "NOT_RUN", "spec_search_01": "NOT_RUN"}
 
 
 @pytest.mark.asyncio
@@ -614,6 +631,25 @@ async def test_preview_selection_intercepts_click_without_changing_exported_html
                 assert (dist / "index.html").read_text(encoding="utf-8") == original
             finally:
                 await browser.close()
+    finally:
+        runner.close_previews()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("works", [True, False])
+async def test_declared_search_verifies_actual_filter(tmp_path: Path, monkeypatch: MonkeyPatch, works: bool) -> None:
+    settings: Any = SimpleNamespace(runtime_dir=tmp_path, preview_host="127.0.0.1", preview_port_start=0, preview_port_end=0)
+    monkeypatch.setattr(runner, "get_settings", lambda: settings)
+    monkeypatch.setattr(inspection, "get_settings", lambda: settings)
+    runner.close_previews()
+    dist = tmp_path / "runs" / "run_search" / "candidate" / "dist"
+    dist.mkdir(parents=True)
+    (dist / "index.html").write_text('<link rel="icon" href="data:,"><input placeholder="搜索"><div>查看邮件</div><div id="other">整理文件</div><script src="./app.js"></script>', encoding="utf-8")
+    (dist / "app.js").write_text("document.querySelector('input').addEventListener('input', e => { document.querySelector('#other').hidden = !!e.target.value; });" if works else "", encoding="utf-8")
+    try:
+        rule = {"placeholder": "搜索", "query": "邮件", "visible_text": "查看邮件", "hidden_text": "整理文件"}
+        result = await inspection.inspect_search("run_search", "candidate", rule)
+        assert result["status"] == ("PASS" if works else "FAIL"), result
     finally:
         runner.close_previews()
 
