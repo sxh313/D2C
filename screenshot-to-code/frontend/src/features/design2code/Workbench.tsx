@@ -190,7 +190,9 @@ export default function D2CWorkbench() {
   }, [addImages]);
 
   const restoreLastRun = useCallback(async () => {
-    const lastRun = window.localStorage.getItem("d2c_last_run");
+    let lastRun: string | null;
+    try { lastRun = window.localStorage.getItem("d2c_last_run"); }
+    catch { setLastRunError("浏览器无法读取最近任务记录；请使用任务 ID 手动恢复。"); return; }
     if (!lastRun) return;
     try {
       const restored = await request<Run>(`/runs/${lastRun}`);
@@ -309,9 +311,12 @@ export default function D2CWorkbench() {
       }
       const sourceSet = await request<SourceSet>("/source-sets", jsonPost({ sources, instructions: instruction, authority_by_dimension: authorityByDimension }));
       await request(`/source-sets/${sourceSet.source_set_id}/confirm`, jsonPost(sourceSet));
-      const created = await request<{ run_id: string }>("/runs", jsonPost(sourceSet, { "Idempotency-Key": crypto.randomUUID() }));
-      window.localStorage.setItem("d2c_last_run", created.run_id);
-      setRun(await request<Run>(`/runs/${created.run_id}`));
+      const created = await request<{ run_id: string; status: string }>("/runs", jsonPost(sourceSet, { "Idempotency-Key": crypto.randomUUID() }));
+      // Keep the acknowledged ID visible even if browser storage or the next
+      // status request fails; polling will fetch the authoritative result.
+      setRun({ run_id: created.run_id, status: created.status || "CREATED", error: null, model_requests: 0, repairs: 0, result: null });
+      try { window.localStorage.setItem("d2c_last_run", created.run_id); setLastRunError(""); }
+      catch { setLastRunError("浏览器无法保存最近任务记录，请复制当前任务 ID 以便恢复。"); }
     } catch (caught) { setError(caught instanceof Error ? caught.message : "操作失败，请重试。"); }
     finally { setBusy(false); }
   }
@@ -324,7 +329,7 @@ export default function D2CWorkbench() {
       if (fullInstruction.length > 5000) throw new Error("修改要求和选中元素内容过长，请缩短要求或选择更小的元素。");
       await request(`/runs/${run.run_id}/repair`, jsonPost({ instruction: fullInstruction }, { "Idempotency-Key": crypto.randomUUID() }));
       setPreview("");
-      setRun(await request<Run>(`/runs/${run.run_id}`));
+      setRun({ ...run, status: "REPAIRING" });
       setRepairInstruction("");
     } catch (caught) { setError(caught instanceof Error ? caught.message : "修复请求失败。"); }
     finally { setBusy(false); }
@@ -348,7 +353,8 @@ export default function D2CWorkbench() {
       const restored = await request<Run>(`/runs/${id}`);
       setPreview(""); setSelectedFile(0); setView("preview"); setRun(restored);
       setLastRunError("");
-      window.localStorage.setItem("d2c_last_run", restored.run_id);
+      try { window.localStorage.setItem("d2c_last_run", restored.run_id); }
+      catch { setLastRunError("浏览器无法保存最近任务记录，请复制当前任务 ID 以便恢复。"); }
     } catch (caught) { setRestoreError(caught instanceof Error ? caught.message : "无法恢复任务。"); }
     finally { setBusy(false); }
   }
