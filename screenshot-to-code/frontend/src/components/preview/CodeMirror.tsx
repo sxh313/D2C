@@ -1,5 +1,5 @@
-import { useRef, useEffect, useMemo } from "react";
-import { EditorState } from "@codemirror/state";
+import { useRef, useEffect } from "react";
+import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, ViewUpdate } from "@codemirror/view";
 import { espresso, cobalt } from "thememirror";
 import {
@@ -22,45 +22,46 @@ interface Props {
 function CodeMirror({ code, editorTheme, onCodeChange }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
-  const editorState = useMemo(
-    () =>
-      EditorState.create({
-        extensions: [
-          history(),
-          keymap.of([
-            ...defaultKeymap,
-            indentWithTab,
-            { key: "Mod-z", run: undo, preventDefault: true },
-            { key: "Mod-Shift-z", run: redo, preventDefault: true },
-          ]),
-          lineNumbers(),
-          bracketMatching(),
-          html(),
-          editorTheme === EditorTheme.ESPRESSO ? espresso : cobalt,
-          EditorView.lineWrapping,
-          EditorView.updateListener.of((update: ViewUpdate) => {
-            if (update.docChanged) {
-              const updatedCode = update.state.doc.toString();
-              onCodeChange(updatedCode);
-            }
-          }),
-        ],
-      }),
-    [editorTheme]
-  );
-  useEffect(() => {
-    view.current = new EditorView({
-      state: editorState,
-      parent: ref.current as Element,
-    });
+  const onCodeChangeRef = useRef(onCodeChange);
+  onCodeChangeRef.current = onCodeChange;
+  const initialCode = useRef(code);
+  const initialTheme = useRef(editorTheme);
+  const theme = useRef(new Compartment());
 
+  useEffect(() => {
+    const editorState = EditorState.create({
+      doc: initialCode.current,
+      extensions: [
+        history(),
+        keymap.of([
+          ...defaultKeymap,
+          indentWithTab,
+          { key: "Mod-z", run: undo, preventDefault: true },
+          { key: "Mod-Shift-z", run: redo, preventDefault: true },
+        ]),
+        lineNumbers(),
+        bracketMatching(),
+        html(),
+        theme.current.of(initialTheme.current === EditorTheme.ESPRESSO ? espresso : cobalt),
+        EditorView.lineWrapping,
+        EditorView.updateListener.of((update: ViewUpdate) => {
+          if (update.docChanged) onCodeChangeRef.current(update.state.doc.toString());
+        }),
+      ],
+    });
+    const editor = new EditorView({ state: editorState, parent: ref.current as Element });
+    view.current = editor;
     return () => {
-      if (view.current) {
-        view.current.destroy();
-        view.current = null;
-      }
+      editor.destroy();
+      view.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    view.current?.dispatch({
+      effects: theme.current.reconfigure(editorTheme === EditorTheme.ESPRESSO ? espresso : cobalt),
+    });
+  }, [editorTheme]);
 
   useEffect(() => {
     if (view.current && view.current.state.doc.toString() !== code) {

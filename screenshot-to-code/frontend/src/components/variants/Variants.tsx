@@ -98,13 +98,15 @@ function Variants() {
         if (code >= "Digit1" && code <= "Digit9") {
           const variantIndex = parseInt(code.replace("Digit", "")) - 1;
           if (
-            commit &&
+            head &&
             variantIndex < variants.length &&
             variants.length > 1 &&
-            !commit.isCommitted
+            !commit?.isCommitted
           ) {
             event.preventDefault();
-            handleVariantClick(variantIndex);
+            if (variantIndex !== selectedVariantIndex) {
+              updateSelectedVariantIndex(head, variantIndex);
+            }
           }
         }
       }
@@ -112,7 +114,7 @@ function Variants() {
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [variants.length, commit?.isCommitted, selectedVariantIndex, head]);
+  }, [variants.length, commit?.isCommitted, selectedVariantIndex, head, updateSelectedVariantIndex]);
 
   if (head === null || !commit) {
     return null;
