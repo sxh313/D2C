@@ -1,15 +1,55 @@
 # Design2Code 本地工作台
 
-> 工作台界面更新（2026-11-10）：整理资料输入、折叠可选的 FigmaToCode 项目包、突出资料摘要与生成操作，并调整结果区及窄屏布局。前端 Vite 构建和工作台文件 ESLint 通过；全项目 lint 仍有其他已有错误，浏览器视觉复核待完成。
+> 工作台界面更新（2026-11-10）：整理资料输入、折叠可选的 FigmaToCode 项目包、突出资料摘要与生成操作，并调整结果区及窄屏布局。前端 Vite 构建和工作台文件 ESLint 通过；已查看桌面及 390 像素窄屏页面，全项目 lint 仍有其他已有错误。
 
 将截图、需求 Spec 和 Figma 节点单独或组合输入，按指令生成 React + TypeScript 页面。本项目以 `screenshot-to-code` 为主工程，调用根目录 `.env` 中配置的模型服务。
 
 ## 首次准备
 
-1. 安装 Node.js、pnpm、Python 3.12 和 Poetry。
-2. 在 `screenshot-to-code\backend` 运行 `poetry install` 和 `poetry run playwright install --only-shell chromium`；在 `screenshot-to-code\frontend` 运行 `pnpm install`。
-3. 在本目录 `.env` 填写模型中转地址、API key 和模型名称。当前使用 `openai/gpt-6-luna`。Figma 默认使用本地 `figma-mcp-bridge`，不需要填写 `FIGMA_ACCESS_TOKEN`；修改后重启服务。
-4. 当前不设置 token 和费用上限，留空即可；模型服务可能产生费用。每个任务最多请求模型 2 次，其中修改最多 1 次，不自动重试。当前填写预算字段会阻止生成，因为预算执行尚未接通。
+以下命令在 Windows PowerShell 中执行。已配置好的本机无需重复安装，也不要覆盖现有 `.env`。
+
+1. 安装 Node.js（建议 20 或更高版本）、pnpm、Python 3.12 和 Poetry，然后在项目目录依次安装依赖：
+
+   ```powershell
+   cd D:\desktop\AI\D2C\Design2Code\screenshot-to-code\backend
+   poetry install
+   poetry run playwright install --only-shell chromium
+   cd ..\frontend
+   pnpm install
+   ```
+
+2. 如需从 Figma 导入节点，构建本机 Bridge 与 Figma 插件：
+
+   ```powershell
+   cd D:\desktop\AI\D2C\Design2Code\figma-mcp-bridge\server
+   npm install
+   npm run build
+   cd ..\plugin
+   npm install
+   npm run build
+   ```
+
+   在 Figma 桌面版通过插件开发菜单导入 `figma-mcp-bridge\plugin\manifest.json`，打开要使用的设计文件并运行 **Figma MCP Bridge** 插件。插件显示 WebSocket Connected 后才能导入节点；文件绑定及排查步骤见下文“Figma MCP Bridge”。只用截图或 Spec 时不需要运行 Figma 插件；如果 `.env` 设为 `mcp`，启动脚本仍需 Bridge server 已构建。
+
+3. 在项目根目录的 `.env` 填写配置。第一次创建时可把下面的字段复制到 **`.env`**，再填写自己的地址和 key；已经填写过时直接保留原文件：
+
+   ```dotenv
+   D2C_PROVIDER=openai
+   D2C_API_PROTOCOL=openai_responses
+   OPENAI_BASE_URL=你的兼容 API 基础地址
+   OPENAI_API_KEY=你的 API key
+   D2C_MODEL=openai/gpt-6-luna
+   D2C_FIGMA_MODE=mcp
+   D2C_MODEL_REQUEST_LIMIT=2
+   D2C_REPAIR_LIMIT=1
+   D2C_AUTO_RETRY_LIMIT=0
+   D2C_TOKEN_LIMIT=
+   D2C_COST_LIMIT_MICRO_USD=
+   ```
+
+   `D2C_API_PROTOCOL` 必须与中转服务支持的接口一致；如服务只支持 Chat Completions，改为 `openai_chat_completions`。MCP 模式不需要 `FIGMA_ACCESS_TOKEN`。地址使用 API 基础路径，具体接口由程序按协议追加。修改配置后重启服务。
+
+4. 当前不设置 token 和费用上限，两个预算字段留空；模型服务可能产生费用。每个任务最多请求模型 2 次，其中修改最多 1 次，不自动重试。当前填写预算字段会阻止生成，因为预算执行尚未接通。
 
 ## 启动和停止
 
