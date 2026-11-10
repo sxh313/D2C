@@ -634,6 +634,8 @@ export default function D2CWorkbench() {
   }
 
   const isRunning = busy || !!run && ["CREATED", "GENERATING", "BUILDING", "REPAIRING"].includes(run.status);
+  const searchFilled = Object.values(searchRule).filter((value) => value.trim()).length;
+  const searchSummary = !searchFilled ? "未设置" : searchFilled < 4 ? "未填写完整" : searchRule.visible_text.trim() === searchRule.hidden_text.trim() ? "示例文本重复" : "已设置";
   const files = run?.result?.files || [];
   if (!draftReady) return <main className="d2c-shell">正在恢复本机草稿…</main>;
   return <div className="d2c-shell">
@@ -650,8 +652,9 @@ export default function D2CWorkbench() {
         {imageError && <div className="d2c-error" role="alert">{imageError}</div>}
         {images.length > 0 && <div className="d2c-thumbnails">{images.map((image, index) => <div className="d2c-thumb" key={`${image.name}-${index}`}><img src={image.data} alt={image.name} /><button type="button" aria-label={`移除 ${image.name}`} onClick={() => { imagesRef.current = imagesRef.current.filter((_, i) => i !== index); setImages(imagesRef.current); }}><LuX /></button></div>)}</div>}
         <label className="d2c-label" htmlFor="d2c-spec">需求 Spec <span>文字或 Markdown</span></label><textarea id="d2c-spec" value={spec} onChange={(event) => setSpec(event.target.value)} placeholder={'例如：任务列表支持搜索、状态筛选和新建弹窗。'} rows={4} />
-        <details><summary>搜索功能验收（可选）</summary><p className="d2c-help">在生成前填写一组可验证示例。两条文本初始都应显示；搜索后第一条保留、第二条隐藏。输入框提示文字和示例文本需与页面完全一致。此检查只覆盖这一组示例。</p>
+        <details><summary>搜索功能验收（可选）— {searchSummary}</summary><p className="d2c-help">在生成前填写一组可验证示例。两条文本初始都应显示；搜索后第一条保留、第二条隐藏。输入框提示文字和示例文本需与页面完全一致。此检查只覆盖这一组示例，规则会保存在本机草稿中。</p>
           {([["placeholder", "搜索框提示文字", "例如：搜索任务"], ["query", "要输入的搜索词", "例如：邮件"], ["visible_text", "搜索后保留的完整文本", "例如：查看邮件"], ["hidden_text", "搜索后隐藏的完整文本", "例如：整理文件"]] as const).map(([key, label, example]) => <label className="d2c-label" key={key}>{label}<input value={searchRule[key]} maxLength={key === "visible_text" || key === "hidden_text" ? 150 : 100} placeholder={example} onChange={(event) => setSearchRule((current) => ({ ...current, [key]: event.target.value }))} /></label>)}
+          <button type="button" disabled={!searchFilled} onClick={() => setSearchRule(emptySearchRule)}>清除搜索验收规则</button>
         </details>
         <label className="d2c-label" htmlFor="d2c-figma">Figma 节点链接 <span>{!capabilities ? "正在检查配置" : capabilities.figma_mode === "mcp" ? (capabilities.figma_configured ? "MCP 模式；请在 Figma 中运行插件" : "请先安装 MCP Bridge") : (capabilities.figma_configured ? "REST 令牌已配置" : "需要配置访问令牌")}</span></label><input id="d2c-figma" value={figma} onChange={(event) => setFigma(event.target.value)} placeholder="https://www.figma.com/design/…?node-id=…" />
         {capabilities?.figma_mode === "mcp" && <div className="d2c-help"><button type="button" disabled={figmaChecking} onClick={() => void checkFigmaConnection()}>{figmaChecking ? "正在检查…" : "检查 Figma 插件连接"}</button>{figmaConnection && <p role="status">{figmaConnection}</p>}</div>}
@@ -674,6 +677,7 @@ export default function D2CWorkbench() {
         <div className="d2c-help d2c-material-summary" aria-label="本次资料摘要">
           <strong>本次资料摘要</strong>
           <p>{images.length ? `${images.length} 张截图作为视觉参考` : "未添加截图"}；{spec.trim() ? "Spec 作为内容与交互参考" : "未添加 Spec"}；{figma.trim() ? "Figma 作为结构参考" : "未添加 Figma"}；{bundle ? "项目包作为源码和图片参考" : "未添加项目包"}。</p>
+          <p>搜索功能验收：{searchSummary}{searchSummary === "已设置" ? `（搜索词：${searchRule.query.trim()}）` : ""}。</p>
           <p>资料存在冲突时，请在生成指令中写明以哪一份为准。系统不会自动判断所有冲突。</p>
         </div>
         {error && <div className="d2c-error" role="alert">{error}</div>}
