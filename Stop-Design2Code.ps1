@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $processFile = Join-Path $PSScriptRoot 'runtime\workbench-processes.json'
 if (-not (Test-Path -LiteralPath $processFile)) { Write-Output '没有找到本工作台启动的进程。'; return }
 function Stop-StartedTree([int]$ParentId, [datetime]$RootStart) {
