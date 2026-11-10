@@ -69,6 +69,21 @@ def test_saved_source_download_without_candidate_directory(tmp_path: Path, monke
         assert client.get("/api/d2c/v1/runs/run_invalid/saved-source").status_code == 409
 
 
+def test_unfinished_build_cannot_export_partial_project(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
+    app = FastAPI()
+    app.include_router(router)
+    result = {"files": [{"path": "src/App.tsx", "content": "new"}, {"path": "src/index.css", "content": ""}],
+              "checks": [{"id": "build", "status": "NOT_RUN"}]}
+    with storage.connect() as db:
+        db.execute("INSERT INTO runs (id,set_id,revision,source_hash,idempotency_key,request_hash,status,result_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                   ("run_partial", "set", 1, "hash", "partial", "hash", "FAILED", json.dumps(result), storage.now(), storage.now()))
+    with TestClient(app) as client:
+        response = client.get("/api/d2c/v1/runs/run_partial/export")
+        assert response.status_code == 409 and "下载已保存源码" in response.json()["detail"]
+        assert client.get("/api/d2c/v1/runs/run_partial/saved-source").status_code == 200
+
+
 def test_visual_check_only_marks_proven_spec_only_inapplicable(monkeypatch: MonkeyPatch) -> None:
     items: dict[str, Any] = {"spec": {"input_type": "spec"}, "image": {"input_type": "screenshot"}, "figma": {"input_type": "figma"}}
     monkeypatch.setattr(runs, "get_input", lambda key: items.get(key))
