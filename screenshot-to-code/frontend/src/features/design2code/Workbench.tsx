@@ -86,7 +86,7 @@ function VisualReview({ runId, candidate }: { runId: string; candidate?: string 
   const [imageError, setImageError] = useState(false);
   const [overlay, setOverlay] = useState(false);
   const [opacity, setOpacity] = useState(50);
-  const [difference, setDifference] = useState<{ width: number; height: number; mean_channel_difference: number; image_data_url: string; candidate_image_data_url?: string } | null>(null);
+  const [difference, setDifference] = useState<{ width: number; height: number; mean_channel_difference: number; image_data_url: string; candidate_image_data_url?: string; warnings?: string[] } | null>(null);
   const [differenceError, setDifferenceError] = useState("");
   const [differenceBusy, setDifferenceBusy] = useState(false);
   const differenceRequest = useRef<AbortController | null>(null);
@@ -110,7 +110,7 @@ function VisualReview({ runId, candidate }: { runId: string; candidate?: string 
     const controller = new AbortController(); differenceRequest.current = controller;
     setDifferenceBusy(true); setDifferenceError(""); setDifference(null);
     try {
-      const result = await request<{ width: number; height: number; mean_channel_difference: number; image_data_url: string; candidate_image_data_url?: string }>(
+      const result = await request<{ width: number; height: number; mean_channel_difference: number; image_data_url: string; candidate_image_data_url?: string; warnings?: string[] }>(
         `/runs/${runId}/visual-diff/${encodeURIComponent(reference.id)}/${mode}`, { signal: controller.signal });
       if (!controller.signal.aborted) setDifference(result);
     } catch (caught) {
@@ -134,7 +134,7 @@ function VisualReview({ runId, candidate }: { runId: string; candidate?: string 
     <div className="d2c-pixel-diff"><button type="button" disabled={!references[selected] || imageError || differenceBusy} onClick={() => void comparePixels(viewport)}>{differenceBusy ? "正在计算…" : "比较现有截图"}</button>{" "}<button type="button" disabled={!references[selected] || differenceBusy} onClick={() => void comparePixels("reference")}>按参考图尺寸截图并比较</button>
       <p className="d2c-help">重新截图会以参考图的宽高作为浏览器视口，仅截取页面顶部可见区域；长页面其余部分不在对比范围。图片不得超过 2000×2000 像素或 400 万像素。亮色表示像素差异；字体、抗锯齿和动态内容都会影响结果，不代表视觉还原率或验收通过。</p>
       {differenceError && <p role="alert">{differenceError}</p>}
-      {difference && <><p>尺寸 {difference.width} × {difference.height}；RGB 平均通道差 {difference.mean_channel_difference} / 255（越低表示像素越接近）。差异亮度放大 3 倍。</p><div className="d2c-visual-grid">{difference.candidate_image_data_url && <div><strong>本次比较的页面截图</strong><img src={difference.candidate_image_data_url} alt="本次比较的页面截图" /></div>}<div><strong>像素差异图</strong><img src={difference.image_data_url} alt="像素差异图" /></div></div></>}
+      {difference && <><p>尺寸 {difference.width} × {difference.height}；RGB 平均通道差 {difference.mean_channel_difference} / 255（越低表示像素越接近）。差异亮度放大 3 倍。</p>{!!difference.warnings?.length && <div className="d2c-error" role="status"><strong>截图提示：</strong><ul>{difference.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div>}<div className="d2c-visual-grid">{difference.candidate_image_data_url && <div><strong>本次比较的页面截图</strong><img src={difference.candidate_image_data_url} alt="本次比较的页面截图" /></div>}<div><strong>像素差异图</strong><img src={difference.image_data_url} alt="像素差异图" /></div></div></>}
     </div>
   </details>;
 }

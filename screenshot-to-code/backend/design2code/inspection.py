@@ -8,7 +8,7 @@ from design2code.runner import _child_env, preview_url
 from design2code.settings import get_settings
 
 
-async def capture_reference_viewport(run_id: str, candidate: str, width: int, height: int) -> bytes:
+async def capture_reference_viewport(run_id: str, candidate: str, width: int, height: int) -> tuple[bytes, list[str]]:
     """Capture only the initial viewport, using the reference image dimensions."""
     settings = get_settings()
     url = preview_url(run_id, settings, candidate)
@@ -16,11 +16,27 @@ async def capture_reference_viewport(run_id: str, candidate: str, width: int, he
         browser = await playwright.chromium.launch(headless=True, env=dict(_child_env()))
         try:
             page = await browser.new_page(viewport={"width": width, "height": height}, device_scale_factor=1)
-            await page.route("**/*", lambda route: route.continue_() if route.request.url.startswith(url) else route.abort())
+            problems: set[str] = set()
+            page.on("pageerror", lambda _error: problems.add("页面存在脚本错误。"))
+            page.on("console", lambda message: problems.add("页面或资源报告错误。") if message.type == "error" else None)
+            page.on("response", lambda response: problems.add("页面资源返回错误状态。") if response.status >= 400 else None)
+            async def route_request(route: Any) -> None:
+                if route.request.url.startswith(url):
+                    await route.continue_()
+                else:
+                    problems.add("页面请求了被阻止的外部资源。")
+                    await route.abort()
+            await page.route("**/*", route_request)
             response = await page.goto(url, wait_until="load", timeout=15000)
             if response is None or not response.ok:
                 raise RuntimeError("Preview returned an unsuccessful HTTP response")
-            return await page.screenshot(full_page=False, timeout=15000)
+            overflow = await page.evaluate("() => ({ horizontal: document.documentElement.scrollWidth > innerWidth + 1, vertical: document.documentElement.scrollHeight > innerHeight + 1 })")
+            if overflow["horizontal"]:
+                problems.add("页面存在水平溢出，视口外内容未纳入比较。")
+            if overflow["vertical"]:
+                problems.add("页面存在视口下方内容，未纳入比较。")
+            screenshot = await page.screenshot(full_page=False, timeout=15000)
+            return screenshot, sorted(problems)
         finally:
             await browser.close()
 

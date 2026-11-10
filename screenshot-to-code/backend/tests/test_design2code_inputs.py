@@ -3,6 +3,7 @@
 import base64
 import asyncio
 import io
+import functools
 import json
 import os
 import shutil
@@ -11,6 +12,7 @@ import subprocess
 import sys
 import threading
 import time
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -73,13 +75,36 @@ async def test_visual_diff_reference_viewport_capture(tmp_path: Path, monkeypatc
     monkeypatch.setattr(d2c_routes, "read_run", lambda _id: {"status": "READY_FOR_REVIEW", "source_set_id": "set", "source_set_revision": 1, "result": {"candidate_name": "candidate"}})
     monkeypatch.setattr(d2c_routes, "get_source_set", lambda *_args: {"sources": [{"input_id": "reference"}]})
     monkeypatch.setattr(d2c_routes, "get_input", lambda _id: {"input_type": "screenshot", "data": {"content_base64": base64.b64encode(image.getvalue()).decode()}})
-    async def capture(_run: str, _candidate: str, width: int, height: int) -> bytes:
+    async def capture(_run: str, _candidate: str, width: int, height: int) -> tuple[bytes, list[str]]:
         assert (width, height) == (4, 3)
-        return image.getvalue()
+        return image.getvalue(), ["页面存在脚本错误。"]
     monkeypatch.setattr(d2c_routes, "capture_reference_viewport", capture)
     result = await d2c_routes.visual_diff("run_test", "reference", "reference")
     assert result["capture"] == "reference_viewport" and result["mean_channel_difference"] == 0
+    assert result["warnings"] == ["页面存在脚本错误。"]
     assert base64.b64decode(result["candidate_image_data_url"].split(",", 1)[1]) == image.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_reference_capture_reports_page_errors_and_overflow(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    (tmp_path / "index.html").write_text('<style>body{width:900px;height:900px}</style><img src="missing.png"><script>throw new Error("test")</script>', encoding="utf-8")
+    handler = functools.partial(SimpleHTTPRequestHandler, directory=str(tmp_path))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setattr(inspection, "preview_url", lambda *_args: f"http://127.0.0.1:{server.server_port}/")
+    try:
+        screenshot, warnings = await inspection.capture_reference_viewport("run_test", "candidate", 390, 400)
+        with Image.open(io.BytesIO(screenshot)) as image:
+            assert image.size == (390, 400)
+        assert "页面存在脚本错误。" in warnings
+        assert "页面资源返回错误状态。" in warnings
+        assert "页面存在水平溢出，视口外内容未纳入比较。" in warnings
+        assert "页面存在视口下方内容，未纳入比较。" in warnings
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
 
 
 def test_main_app_only_exposes_tracked_model_generation() -> None:

@@ -280,9 +280,10 @@ async def visual_diff(run_id: str, input_id: str, viewport: Literal["desktop", "
                 width, height = image.size
             if width > 2000 or height > 2000 or width * height > 4_000_000:
                 raise HTTPException(422, "参考图宽高须各不超过 2000 像素，且不超过 400 万像素。")
-            captured = await capture_reference_viewport(run_id, candidate, width, height)
+            captured, warnings = await capture_reference_viewport(run_id, candidate, width, height)
             result = await asyncio.to_thread(_pixel_difference, reference, io.BytesIO(captured))
             result["capture"] = "reference_viewport"
+            result["warnings"] = warnings
             result["candidate_image_data_url"] = "data:image/png;base64," + base64.b64encode(captured).decode("ascii")
             return result
         except HTTPException:
