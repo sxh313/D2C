@@ -37,6 +37,17 @@ import design2code.routes as d2c_routes
 import design2code.settings as d2c_settings
 
 
+def test_generated_jsx_root_image_src_uses_relative_path() -> None:
+    payload = {"files": [
+        {"path": "src/App.tsx", "content": "<><img src=\"/images/a.png\" /><img src=\"https://example.test/a.png\" /></>"},
+        {"path": "src/index.css", "content": "body { color: black; }"},
+    ]}
+    files = runs.parse_files(json.dumps(payload))
+    assert 'src="./images/a.png"' in files[0]["content"]
+    assert 'src="https://example.test/a.png"' in files[0]["content"]
+    assert files[1]["content"] == payload["files"][1]["content"]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("payload, expected", [({"data": [{}]}, "connected"), ({"data": []}, "no_session"), ({"error": "failed"}, "unavailable")])
 async def test_figma_connection_status(monkeypatch: MonkeyPatch, payload: dict[str, Any], expected: str) -> None:

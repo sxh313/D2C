@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import re
 from pathlib import PurePosixPath
 from typing import Any, cast
 
@@ -115,7 +116,12 @@ def parse_files(text: str) -> list[dict[str, str]]:
         if not allowed or ".." in parts or "\\" in path or path in seen or len(item["content"]) > 300_000:
             raise ProviderError("GENERATION_INVALID", "生成结果包含不允许的文件路径、重复文件或过大文件。")
         seen.add(path)
-        output.append({"path": path, "content": item["content"]})
+        content = item["content"]
+        # The preview lives below /<run>/<candidate>/; root-relative image
+        # src values bypass that prefix. Preserve other code and URLs.
+        if path.endswith(".tsx"):
+            content = re.sub(r"(\bsrc\s*=\s*[\"'])/images/", r"\1./images/", content)
+        output.append({"path": path, "content": content})
     if len(output) > 40 or not {"src/App.tsx", "src/index.css"}.issubset(seen):
         raise ProviderError("GENERATION_INVALID", "生成结果缺少 App.tsx 或 index.css。")
     return output
