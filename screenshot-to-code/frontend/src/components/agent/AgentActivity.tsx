@@ -206,18 +206,17 @@ function getEventTitle(event: AgentEvent): string {
       return event.status === "running" ? "Editing file" : "Edited file";
     }
     if (event.toolName === "generate_images") {
-      const input = event.input as any;
-      const output = event.output as any;
-      const count = output?.images?.length || input?.count || 0;
+      const inputCount = getRecord(event.input)?.count;
+      const count = getArrayField(event.output, "images")?.length ||
+        (typeof inputCount === "number" ? inputCount : 0);
       if (event.status === "running") {
         return count ? `Generating ${count} image${count !== 1 ? "s" : ""}` : "Generating images";
       }
       return count ? `Generated ${count} image${count !== 1 ? "s" : ""}` : "Generated images";
     }
     if (event.toolName === "remove_backgrounds") {
-      const rbInput = event.input as any;
-      const rbOutput = event.output as any;
-      const rbCount = rbOutput?.images?.length || rbInput?.image_urls?.length || 0;
+      const rbCount = getArrayField(event.output, "images")?.length ||
+        getArrayField(event.input, "image_urls")?.length || 0;
       if (event.status === "running") {
         return rbCount > 1 ? `Removing ${rbCount} backgrounds` : "Removing background";
       }
@@ -243,9 +242,8 @@ function getEventTitle(event: AgentEvent): string {
         : "Retrieved option";
     }
     if (event.toolName === "save_assets") {
-      const saveInput = event.input as any;
-      const saveOutput = event.output as any;
-      const saveCount = saveOutput?.images?.length || saveInput?.asset_ids?.length || 0;
+      const saveCount = getArrayField(event.output, "images")?.length ||
+        getArrayField(event.input, "asset_ids")?.length || 0;
       if (event.status === "running") {
         return saveCount > 1 ? `Saving ${saveCount} assets` : "Saving asset";
       }
