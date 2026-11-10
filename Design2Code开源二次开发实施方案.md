@@ -1,0 +1,1865 @@
+# Design2Code 开源二次开发实施方案
+
+更新日期：2026-11-10  
+版本：v2.3，按用户要求暂不设置 token 和费用上限，保留每次任务的请求次数限制。  
+状态：三个上游仓库已克隆；主工作台可本地启动；截图/Spec/项目包输入、生成、构建、预览、修复、导出和 MCP bridge 适配已接入；真实 Figma 插件联调与三资料真实模型验收仍待完成。  
+目标目录：`D:\desktop\AI\D2C\Design2Code`  
+项目定位：个人开发的通用 Design2Code 工具，不绑定电商行业。
+
+本文阅读方式：第 1～17 节说明产品范围与实施顺序；第 18 节给出逐模块接口、字段、调用顺序、文件落点、错误处理和联调案例；18.20 专门说明多种资料如何在一个任务中共同使用。所有“拟新增”接口均为本项目设计，不应当作上游已有接口调用。
+
+### 当前源码基线
+
+| 本机目录 | origin | 已拉取 commit | 在本项目中的职责 |
+| --- | --- | --- | --- |
+| `screenshot-to-code/` | `git@github.com:abi/screenshot-to-code.git` | `a8139779f7c5ae231b7f2a86fa7f83ddc5f7badc` | 主前端、FastAPI、供应商适配与预览基础 |
+| `FigmaToCode/` | `git@github.com:bernaferrari/FigmaToCode.git` | `f5c4831d5de6cffc19a73fe2823c56b4bb551281` | Figma 插件转换参考、可选独立导入路径 |
+| `onlook/` | `git@github.com:onlook-dev/onlook.git` | `423e2e924366419e418ee049093872d535eea41a` | 元素定位、跨 iframe 通信和源码修改参考 |
+
+旧的 `server.py`、`web/index.html` 是演示壳：确定性生成 HTML、接口内存返回结果；当前预览容器是 `div`，给它设置 `srcdoc` 不会成为 iframe。运行接口健康检查不能证明浏览器预览已通过。它没有集成三个开源仓库，也没有完成截图上传、粘贴、图片压缩或输入持久化。这些缺口在迁移时由真正的 React 前端替代，不继续扩大演示壳职责。
+
+### 接口阅读导航
+
+| 原方案部分 | 详细对接章节 |
+| --- | --- |
+| 1 产品目标、2 开源复用、4 架构目录 | 18.1、18.6、18.7、18.14 |
+| 3 旧项目迁移 | 18.18 |
+| 5 三种输入及组合使用 | 18.2～18.6、18.20 |
+| 6 代码工程化 | 18.7、18.8 |
+| 7 接口与状态 | 18.9、18.10 |
+| 8 构建预览 | 18.11 |
+| 9 验收、10 修复 | 18.12、18.13 |
+| 11 前端、12 配置与导出 | 18.15～18.17 |
+| 13～17 实施、测试、交接 | 18.19、第 19、20 节 |
+
+## 1. 最终要做成什么
+
+用户可以单独或同时上传截图、选择 Figma 设计节点、输入 Markdown/文字 Spec，并通过本次指令指定每份资料的用途。系统将这些资料合成同一个任务的输入，生成一个可以启动、预览、修改和导出的前端工程，并能对生成结果做检查、给出失败原因，执行有上限的修复。
+
+核心过程是：输入设计或需求 → 整理生成上下文 → 生成代码 → 构建和预览 → 检查结果 → 必要时修复 → 导出源码与报告。
+
+可以生成落地页、后台管理页面、仪表盘、表单、内容展示页、个人主页等。电商只是一种可选样例，不是架构前提，也不再把价格、商品身份等规则作为所有页面的必检项。
+
+第一版的“通用”指输入和页面业务类型不绑定行业，不代表同时支持所有框架、复杂业务系统和原生移动应用。
+
+### 1.1 第一版固定边界
+
+- 三种输入：PNG/JPEG 截图、Figma 指定节点、Markdown/文字 Spec；支持单独使用、任意两种组合或三种一起使用，均可附加本次指令。
+- 组合输入仍以一个页面为范围：首版最多 3 张有明确用途的截图、1 个 Figma Frame、1 份主 Spec，不能把不相关的页面混为一个生成任务。
+- 输出技术栈：React + TypeScript + Vite + Tailwind；版本在起步阶段选定并锁定。
+- 输出范围：一个页面及其组件，允许表单、筛选、切换、弹窗等前端交互。
+- 运行范围：本机单用户、同时执行一个生成任务。
+- 数据范围：静态数据或明确标注的本地 mock adapter，不默认接真实业务数据库。
+- 成品范围：可运行源码、依赖锁文件、资源文件、运行说明、检查报告和截图。
+- 不默认部署公网，不把“浏览器能预览”写成“生产上线”。
+
+### 1.2 暂不做的内容
+
+- Android、iOS、鸿蒙原生代码与真机验收。
+- Vue、Flutter、SwiftUI、Next.js 等多输出后端同时支持。
+- 支付、真实登录、订单等业务后端自动开发。
+- 多租户、多人审批、独立 reviewer 平台、企业权限中心。
+- 通用拖拽编辑器、完整设计系统、Figma 双向同步。
+- 无限自动修复、多模型并行比稿、复杂多 Agent 编排。
+- 录屏输入、整站批量生成和任意现有仓库自动重构。
+
+## 2. 开源项目怎么用
+
+### 2.1 screenshot-to-code：优先验证的主底座
+
+优先复用其输入界面、模型接入、生成结果展示和预览能力。官方说明其采用 React/Vite 前端与 FastAPI 后端，可本地运行，并提供可选的浏览器截图检查能力。[官方仓库](https://github.com/abi/screenshot-to-code)
+
+实施方式：直接以当前 `screenshot-to-code/` 为主工程，在其分支中开发，保留原始历史、许可证和上游 remote。旧规划里的 `app/` 只是候选目录名，本版统一使用已存在的仓库目录，不再重复克隆或另建 `app/`。
+
+先验证以下问题，再确认是否以整个仓库作为长期底座：
+
+1. 选定提交能否在当前 Windows/WSL 环境运行。
+2. 生成结果实际是完整工程、单文件页面还是代码片段。
+3. 能否限制为一个候选，而不是并行生成多个版本。
+4. 模型 SDK、Agent 循环、资源提取和图片生成是否暗含额外请求。
+5. 能否把供应商调用统一收口到一个预算入口。
+6. 预览能力是否可与固定的 React 工程模板结合。
+
+不能把“支持 React 输出”等同于“已经支持我们需要的多文件 TypeScript 工程导出”。后者必须实际验证；不足部分由工程包装器补齐。
+
+已检查的上游生成路由存在候选模型选择和 Agent 生成阶段，因此不能假设点击一次按钮只发起一次供应商请求。[上游生成路由](https://github.com/abi/screenshot-to-code/blob/main/backend/routes/generate_code.py)
+
+本机源码进一步确认：`backend/config.py` 默认 `NUM_VARIANTS = 4`；`ModelSelectionStage` 更新模式固定选择 2 个候选；`agent/engine.py` 的工具循环上限为 30 步。只改一个候选配置无法同时限制更新分支和每个候选内部的模型请求。
+
+已有的 `POST /api/export` 根据客户端提交的 HTML 收集图片并导出 ZIP，不能直接作为“已构建、已检查、多文件 TSX 工程”的权威导出入口。
+
+若完整底座适配成本过高，先形成评估记录，再选择保留上游 UI 与供应商适配、替换生成执行路径的方案；不要一边复用一边再建设第二套完整工作台。
+
+### 2.2 Figma to Code：结构化设计转换参考
+
+参考其“读取节点 → 标准化 → 布局处理 → 目标代码生成”的方式，不在第一版直接整合其整个工程。其官方说明明确区分视觉骨架与应用逻辑，源码采用 GPL-3.0。[官方仓库](https://github.com/bernaferrari/FigmaToCode)
+
+执行原则：
+
+- 可以研究公开架构和功能，但不把复制的代码改名后当作自主实现。
+- 首版优先通过 Figma 官方数据接口或用户导出的设计资料接入。
+- 如决定直接复用 GPL 源码，先确定项目分发方式与许可证兼容方案；不能默认与 MIT 底座任意合并，也不能仅靠“放在独立目录”判断合规。
+- 不承诺 Figma 转换器自动生成状态管理、数据请求或业务行为。
+
+### 2.3 Onlook：后续交互参考
+
+仅参考元素定位、代码与页面联动、可视化修改等交互。它的开源实现面向 Next.js/Tailwind，并与后续托管产品区分；本方案不依赖其托管服务，也不首期引入完整工程。[官方仓库](https://github.com/onlook-dev/onlook)
+
+### 2.4 上游版本管理
+
+- 记录上游 URL、完整 commit、许可证文件与本地修改范围。
+- 不跟随浮动 `main` 自动升级；升级单独执行构建、生成、预算和导出回归。
+- README 中明确“基于 screenshot-to-code 二次开发”，列出新增能力。
+- 本文引用的是检索时的上游能力，具体开发以克隆后锁定提交为准。
+
+### 2.5 三个仓库采用什么连接方式
+
+- screenshot-to-code：直接在 Python/React 工程内增加适配模块，属于源码级集成。
+- Figma 官方接口：由 FastAPI 后端通过 HTTP 读取选定节点，属于数据级集成；无需运行 FigmaToCode 的 Web 站点。
+- FigmaToCode：默认以用户导出的设计包/项目包作为文件级输入；若选择直接修改和分发插件源码，再单独落实许可证方案，不在 Python 中直接 import TypeScript 插件代码。
+- Onlook：先沿用主底座已有的选中修改功能；未来增加独立 `postMessage` 事件和 AST 适配器，属于协议/源码能力迁移，不把整个 Next.js、Supabase、Bun 服务同时作为首版依赖。
+
+“仓库已拉取”“代码已接入”“接口联调通过”“真实案例通过”分别记录，不能相互替代。
+
+## 3. 与旧 D2C 工程的关系
+
+新工程是面向通用页面的独立产品方向，不是把旧商品卡片任务改名后宣称完成。
+
+### 3.1 可以选择性迁移
+
+- 运行日志、模型用量记录和候选版本绑定的思路。
+- 构建超时、进程清理、取消和错误分类。
+- 多视口截图、基础可访问性、页面溢出检查。
+- 限次修复、失败诊断结构和交付哈希索引。
+- 不依赖电商数据的测试用例和可独立提取的纯函数。
+
+### 3.2 不整套搬迁
+
+- 旧审批 revision、PlanApproval、operator gate 与签署数据库。
+- 商品价格、商品身份、搜索分页等特定业务的固定 17 项规则。
+- 必须同时运行 PostgreSQL、S3、Keycloak 和多 Worker 的部署组合。
+- 依赖旧 Evidence 表、审批状态和角色体系的完整导出类。
+
+当前 `platform/services/backend/src/d2c/bootstrap/product_acceptance.py` 的检查装配依赖 PostgreSQL Evidence writers，`application/product_delivery_export.py` 也依赖审批和交付数据模型，不能当作独立库直接接入新底座。迁移应从规则、输入输出协议和测试样例开始，不从旧服务启动链开始。
+
+### 3.3 旧工程处理原则
+
+- 本轮不删除、不改名、不清理旧项目及其 `.local`、数据库和报告。
+- 不复用旧任务审批、模型调用额度或验收状态作为新任务的证明。
+- 本方案不改写旧项目治理规则，也不降低旧商品卡片任务的验收分母。
+- 新版稳定后，再由用户决定停止维护哪些旧模块；归档与删除单独执行。
+
+## 4. 最小架构与目录
+
+优先在上游单仓库中新增模块，不新增微服务、第二套 Agent 框架或任务中间件。
+
+目录以已拉取的仓库为准。`design2code/`、模板、运行数据及新增脚本是后续拟新增内容：
+
+```text
+Design2Code/
+  Design2Code开源二次开发实施方案.md
+  .env                         # 本项目唯一实际配置文件，已创建待填写
+  server.py                    # 已有演示服务，迁移期间保留
+  web/                         # 已有演示页面
+  screenshot-to-code/          # 已存在；主开发仓库
+    frontend/                  # 沿用上游界面，增加输入和报告页
+    backend/
+      design2code/
+        inputs/                # screenshot / figma / spec 适配
+        contracts/             # 输入、输出、检查、运行记录
+        generation/            # Prompt 装配、结果解析、预算入口
+        workspace/             # 候选文件、路径校验、模板包装
+        runner/                # 构建、预览、停止、截图
+        checks/                # 通用规则与输入类型专属规则
+        repair/                # 失败反馈与修复次数限制
+        reports/               # JSON、HTML 与 ZIP 导出
+    templates/react-vite/      # 固定、可复现的输出工程模板
+    examples/                  # 无秘密的示例输入和 Spec
+    tests/                     # 单元、集成、E2E
+    scripts/                   # 本机启动、检查、停止
+    docs/                      # 来源、使用、架构与验证记录
+    .gitignore
+    LICENSE                    # 保留上游版权及许可证
+  FigmaToCode/                 # 已存在；插件参考/独立导出路径
+  onlook/                      # 已存在；后续可视化编辑参考
+  runtime/                     # 任务资料与产物；不提交
+    runs/<run_id>/
+    metadata.sqlite
+```
+
+初期持久化建议使用 SQLite 存运行元数据，本地目录存大文件。这里是待实现的简化方案，不是已有能力。仅一个后台执行者负责修改任务状态；不同时引入 PostgreSQL 和 S3。未来确有多人访问或共享部署需求时再评估迁移。
+
+应用前端与生成页面必须运行在不同 origin。预览 iframe、浏览器采集器和导出目录不能读应用的 `.env` 或模型凭据。
+
+## 5. 三种输入如何统一
+
+### 5.1 统一 DesignBrief，而不是建设完整设计编译器
+
+三类适配器分别保存不可变的原始输入，再通过 SourceSet 组合成同一个任务的资料集合，形成统一的轻量 DesignBrief。明确哪些字段来自哪份资料、哪些来自用户指令、哪些只是推断。单输入也是只有一个元素的 SourceSet，不建设另一套执行流程。
+
+建议字段：
+
+```text
+DesignBrief
+  schema_version
+  source_set_id + source_set_revision + source_set_hash
+  input_types[]: screenshot | figma | spec（可同时出现）
+  instructions: 本次任务指令
+  authority_by_dimension: 布局、样式、内容、交互、响应式分别采用的来源
+  resolutions[]: 资料冲突的明确处理结论
+  source_refs[]: 本地资源引用、摘要、来源类型
+  viewport: 原始画面宽高（如有）
+  target_stack: 固定的输出模板版本
+  sections[]: 区块及其内容/布局描述
+  design_tokens: 颜色、字体、间距（可缺省）
+  assets[]: 文件引用、尺寸、来源、可用状态
+  interactions[]: 触发动作、前置条件、预期结果
+  responsive_rules[]: 已声明的响应式要求
+  acceptance_criteria[]: 可追踪的验收条目
+  assumptions[]: 未确认的生成假设
+  unresolved[]: 缺图、缺状态、信息冲突等问题
+```
+
+为重要字段记录 `provenance = source | user | inferred`。截图推测的字号、Spec 自动补充的布局不能标成设计稿的精确值。
+
+提交生成前展示一页“输入摘要”，允许用户确认内容、响应式行为和关键交互。缺少非关键设计细节时采用模板默认值并记录假设，不为每个像素弹出确认。
+
+### 5.2 ScreenshotAdapter
+
+处理步骤：
+
+1. 检查实际文件类型、解码结果、尺寸和文件大小，不只检查扩展名。
+2. 保留原图及 SHA-256；生成供模型使用的受限尺寸副本，记录缩放关系。
+3. 接收可选补充说明，例如“按钮打开弹窗”“移动端列表改单列”。
+4. 原图/副本与说明直接参与首次生成，首版不额外调用模型做一轮布局解析。
+5. 将没有来源的交互记录为假设；不从截图虚构真实 API 或登录行为。
+6. 生成后按原始视口截图，先对齐尺寸、字体加载和资源状态，再比较布局。
+
+首版限制：最多 3 张 PNG/JPEG 共同描述一个页面，每张标注用途、区域、视口与状态；可以是桌面图、移动图或局部样式参考，不自动推导跨页面流程或任意状态关联。超长图分块和录屏理解后置。缺少原始图片资源时明确使用占位或用户提供资源，不把占位图当作还原完成。
+
+验收：图片损坏可解释地拒绝；宽高可追踪；生成代码能运行；截图对比绑定同一候选；原图与生成结果可并排查看。
+
+### 5.3 SpecAdapter
+
+这里的 Spec 指文字/Markdown 页面需求说明，不限定某种协议。
+
+建议用户描述以下信息：
+
+```text
+页面目标：项目任务管理
+内容：标题、搜索框、状态筛选、任务列表、新建任务按钮
+交互：搜索按标题过滤；筛选待办/进行中/完成；新建打开弹窗
+状态：加载中、没有任务、保存失败、保存成功
+视觉：浅色、紧凑布局、蓝色强调色
+响应式：桌面左右布局；窄屏上下排列
+数据：本地演示数据，不连接真实任务系统
+```
+
+处理步骤：
+
+1. 接收文本或 `.md`；保留原始版本及哈希。
+2. 按标题、列表和已知字段做确定性整理；自由文本无法可靠解析时保留原文。
+3. 提取可以确认的验收条目；有歧义的行为让用户补充，不额外默认调用解析模型。
+4. 把模板规则、Spec、确认后的交互与验收条目一起交给生成模型。
+5. 同时展示生成结果与条目覆盖情况，不能只展示一张好看的预览图。
+
+验收：声明的功能能执行；缺失需求被报告；没有参考图时不展示“视觉还原率”。Spec-only 的视觉对比标记为“不适用”，不是通过，也不是失败；基础布局和可访问性仍需检查。
+
+### 5.4 FigmaAdapter
+
+区分两种交付级别：
+
+- 资料导入：用户提供 Figma 导出的图片及资源，可作为 screenshot 输入，但不能宣传成完整节点解析。
+- 直接接入：输入文件/节点链接，在用户具备访问权限的情况下取得指定节点资料与渲染图，才算 Figma 输入功能完成。
+
+直接接入实施步骤：
+
+1. 解析受支持的 Figma 链接形式，提取文件标识和节点标识，拒绝把它当作任意 URL 抓取入口。
+2. 后端使用本机配置的访问凭据请求官方接口；凭据不发送到生成页面。
+3. 只读取选定 Frame/组件及必要子树，不默认读取整个设计文件。
+4. 获取节点布局、文字、样式、Auto Layout、尺寸、图片引用以及该节点的渲染图。
+5. 标准化进 DesignBrief，保留 node id、源版本标识（如可用）和快照摘要。
+6. 下载生成所需的资源并改为本地引用；处理资源链接过期，不把临时 URL 直接写进交付物。
+7. 将结构信息和渲染图一并交给模型；遇到复杂矢量、不可用字体和组件语义缺失时显式报告。
+8. 根据同一快照渲染图检查结果；执行期间设计更新不能偷偷替换当前任务输入。
+
+开始实现前重新核对 Figma 官方接口、授权方式、账号权限和限流规则。用户无法提供可访问文件时，降级为资料导入，并明确直接接入尚未验收。
+
+重要限制：Figma 的视觉结构不天然包含完整产品行为，交互逻辑仍需要 Spec 补充。
+
+## 6. 生成代码怎样成为可运行工程
+
+### 6.1 固定模板先行
+
+先制作一个不依赖模型即可构建的 React/Vite 模板，锁定 Node、包管理器、React、TypeScript 和 Tailwind 版本，并保存 lockfile。
+
+模型主要生成：`src/App.tsx`、`src/components/**`、允许的样式文件和本地数据适配文件。
+
+默认不允许模型修改依赖清单、构建脚本、启动脚本和权限配置。新增依赖通过显式工程变更处理，不能直接执行生成代码附带的任意安装命令。
+
+### 6.2 统一输出 GenerationResult
+
+```text
+GenerationResult
+  files[]: { path, content }
+  entrypoint
+  asset_refs[]
+  assumptions[]
+  requirement_mapping[]
+  provider_receipt_ref
+```
+
+模板包装器负责把结果转换为真实文件工程。优先要求供应商返回可解析的结构化输出；若上游只返回单文件 HTML/JSX，则在适配层显式转换或拒绝不支持的输出，不假装已得到 TSX 多文件工程。
+
+### 6.3 写入前校验
+
+- 路径必须是规范化的相对路径，拒绝 `..`、绝对路径、盘符、符号链接逃逸。
+- 仅写入当前候选目录及允许文件集合。
+- 限制文件数量、单文件大小、总输出大小。
+- 资源引用只能指向本次允许的本地资产。
+- 每一版文件计算摘要；修复写新候选，不覆盖上一版。
+- 模型输出中的“运行此命令”视为数据，不作为自动执行指令。
+
+### 6.4 Prompt 分层
+
+固定工程约束、输入资料、页面 Spec、组件约定分别组织，避免把整份旧仓库塞给模型。
+
+固定约束包括目标技术栈、允许文件、资源使用、输出协议和禁止任意外部依赖。输入资料作为不可信设计内容，不得覆盖执行规则。修复时只补入当前候选代码、失败条目及对应截图，不携带无限历史。
+
+## 7. 后端接口与运行状态
+
+以下为新增模块的建议契约，不代表上游已存在这些 API。初期保留上游能复用的接口，对外统一在适配层收口。
+
+### 7.1 接口
+
+- `POST /api/d2c/v1/design-inputs`：上传图片/Spec，返回 `input_id` 和摘要。
+- `POST /api/d2c/v1/design-inputs/figma`：提交 Figma 节点链接，读取并固定输入快照。
+- `POST /api/d2c/v1/source-sets`：将图片、Spec、Figma 输入引用与本次指令组合，返回资料集合版本及 Brief 草稿。
+- `GET /api/d2c/v1/source-sets/{id}`：读取当前资料集合、各来源状态、冲突和 Brief。
+- `PUT /api/d2c/v1/source-sets/{id}`：修改资料用途、指令或冲突结论，使用 If-Match 校验并生成新 revision。
+- `PUT /api/d2c/v1/source-sets/{id}/brief`：保存人工补充与确认后的 Brief，绑定指定的资料集合版本。
+- `POST /api/d2c/v1/runs`：指定固定的资料集合版本、确认后的 Brief、模板版本和本次调用上限，返回 `run_id`。
+- `GET /api/d2c/v1/runs/{id}`：查询状态、当前候选、检查摘要和预算消耗。
+- `GET /api/d2c/v1/runs/{id}/events?after_seq=...`：读取断线后遗漏事件。
+- `WS /api/d2c/v1/runs/{id}/stream?after_seq=...`：只订阅增量事件，不触发生成。
+- `POST /api/d2c/v1/runs/{id}/cancel`：标记取消，终止本地构建/预览并阻止后续模型调用。
+- `POST /api/d2c/v1/runs/{id}/repair`：仅在有失败、额度充足且未修复时接受请求。
+- `GET /api/d2c/v1/runs/{id}/report`：读取 JSON/HTML 报告。
+- `GET /api/d2c/v1/runs/{id}/export?candidate_id=...`：导出已固定候选；失败候选允许用于调试，但必须带失败状态，不能标为合格交付。
+
+统一增加 `/api/d2c/v1` 前缀，以免与上游 `/api/export`、运行记录和评测接口混淆。详细请求体、返回体和错误码见第 18 节。
+
+创建任务与修复接口带幂等键；重复点击返回同一操作，不重复收费。事件带 `seq`、时间、阶段和候选标识；重连补齐事件不重新执行任务。
+
+### 7.2 状态
+
+主要阶段：`CREATED`、`INPUT_READY`、`GENERATING`、`BUILDING`、`CHECKING`、`REPAIRING`、`READY_FOR_REVIEW`。
+
+结束状态：`COMPLETE_LOCAL`、`FAILED`、`CANCELLED`、`UNKNOWN_EXTERNAL`。
+
+- `COMPLETE_LOCAL`：必要检查完成且用户确认本地演示结果，不表示旧系统的正式验收或上线授权。
+- `UNKNOWN_EXTERNAL`：供应商可能已接收请求，但本地未取得确定结果；不得自动重新提交。
+- 没有失败时直接进入人工查看，不为了展示自动修复而故意修改真实候选。
+- 必须演示失败拦截时，单独建立故障注入测试，并与真实模型运行记录区分。
+
+### 7.3 最小存储
+
+SQLite 建议仅建立 inputs、runs、candidates、events、checks、provider_calls 六类记录。源码、截图、日志保存在运行目录，用相对路径和哈希引用，不把大文件直接塞入数据库。
+
+任务恢复只恢复可确定的阶段。进程崩溃时先检查遗留进程与调用状态；不能因为没有成功记录就假设外部请求没发出去。
+
+## 8. 构建、预览和基础安全
+
+### 8.1 构建步骤
+
+1. 为候选创建独立工作目录，复制固定模板和允许文件。
+2. 使用受控依赖环境，不让模型选择可执行程序、工作目录或安装脚本。
+3. 运行固定类型检查和构建命令，采集退出码、精简错误和耗时。
+4. 构建成功后启动绑定本机地址的预览，校验端口与 readiness。
+5. 浏览器访问预览，等待字体和必要资源就绪，收集截图、控制台错误和 DOM 观测。
+6. 任务结束或取消时停止进程树、释放端口，保留报告需要的产物。
+
+### 8.2 执行边界
+
+- 独立目录不等于安全沙箱；锁定模板和路径校验也不能替代进程隔离。
+- 代码执行环境不得继承模型/Figma 凭据，不可写宿主源码和用户目录。
+- 对新依赖安装、任意脚本与外网请求默认禁用；必要资源在输入阶段受控下载。
+- 优先评估复用现有 WSL/受管 runner，或采用具备文件、网络、进程限制的隔离方式；只选择一种首版实现，不建设多套执行系统。
+- 若本机隔离暂未就绪，只做代码生成/静态检查与人工启动，不把自动执行功能写成安全可用。
+- 浏览器预览与应用控制台分离 origin，并限制 iframe 能力；展示页面不得读取运行管理 API 中的秘密。
+
+## 9. 验收体系：通用规则加输入专属规则
+
+### 9.1 所有输入都检查
+
+- TypeScript 检查与生产构建。
+- 页面可加载，无未处理的关键 JavaScript 异常。
+- 主要资源可加载，缺少字体、图片要可见地报告。
+- 页面没有明显水平溢出、内容遮挡和不可点击的主要控件。
+- 已声明交互可执行，键盘焦点和表单标签基本可用。
+- 导出的工程在新的工作目录中能按文档启动。
+
+建议视口基线为 1440、768、390 px。这是 Web 响应式测试，不是三端真机验证。没有小屏设计稿时只能验证合理响应式行为，不能宣称小屏像素级还原。
+
+### 9.2 截图/Figma 的视觉检查
+
+- 先统一视口、设备缩放、字体、截图时机和动画状态。
+- 对比布局分区、位置尺寸、间距、文字、颜色与图片。
+- 像素 diff 作为诊断信号，不能把抗锯齿差异直接判成业务失败。
+- 对动态内容使用预先声明的屏蔽区，不允许模型事后随意扩大屏蔽范围。
+- 第一版采用确定性检查加用户并排复核；额外视觉模型评审后置，并单独计算调用次数。
+- 相似度阈值通过小样本校准后固定，不能先编造“95% 还原率”。
+
+### 9.3 Spec 的功能检查
+
+每个验收项有稳定 ID，例如 `SPEC-SEARCH-01`。为已支持的交互类型实现固定测试模板：文本过滤、Tab 切换、弹窗开关、表单必填、列表排序等。
+
+模型可以建议测试映射，但不能自行决定需求通过。未支持自动检查的交互标记为待人工检查，不能自动算作成功。对于页面根本未声明的功能，不凭空增加必检要求。
+
+### 9.4 检查记录
+
+```text
+CheckResult
+  check_id / category
+  applicability: applicable | not_applicable
+  status: PASS | FAIL | UNKNOWN | NOT_RUN
+  expected / observed
+  evidence_refs[]
+  candidate_hash / rule_version
+  reason
+```
+
+不适用项必须有理由且从统计分母排除；适用但没执行、没证据的检查不得排除来美化通过率。检查计划在生成前确认，不能根据结果临时删失败项。
+
+## 10. 自动修复与调用预算
+
+第一版建议“一个候选生成 + 最多一次修复”，并在供应商 HTTP/SDK 调用边界计数，而不是只数 UI 操作或 Agent 轮次。
+
+修复步骤：
+
+1. 从构建/运行/视觉/交互检查中提取失败条目。
+2. 反馈包含具体文件错误、期望与实际值、必要截图，不只写“页面不好看”。
+3. 生成新版本候选，保留旧候选和差异。
+4. 重新执行所有适用的必检项，而不只重跑上一次失败项。
+5. 再次失败则结束并输出报告，不进入无限循环。
+
+用户指定代码模型请求最多 2 次、自动重试 0 次、禁用多候选并发和额外模型调用；当前不设置 token 或费用上限。首次生成和修复通过中转统一使用 `openai/gpt-6-luna`，不自动切换其他模型。实际协议、图片输入支持和用量返回方式仍需核验。
+
+如果上游 Agent 工具循环需要额外模型请求，必须改为单次生成路径，或者明确重新商定上限；不能仅修改一个 `max_iterations` 就宣称符合两次请求限制。SDK 内置重试也必须核对。
+
+修复重入、双击按钮、网络重连和后台恢复应共用同一预算记录。取消只代表本地停止后续工作，不保证供应商已停止计费。
+
+## 11. 前端页面怎么改
+
+尽量复用上游页面，不另外设计一套庞大的工作台。
+
+### 11.1 输入区
+
+- Screenshot / Figma / Spec 三个添加入口，已添加资料共同保留，不互斥。
+- 截图上传、Figma 链接输入、Spec Markdown 编辑。
+- 资料列表：每份资料的用途、适用区域、视口/状态、读取状态和删除/替换操作。
+- 本次指令：明确布局、样式、交互分别采用什么，以及需要增删的内容。
+- 可选补充资源和交互说明。
+- 固定输出技术栈提示。
+- 合并后的输入摘要、采用来源、冲突处理与假设确认。
+
+### 11.2 运行区
+
+- 当前阶段、耗时、调用次数与用量。
+- 本轮候选版本、取消操作。
+- 错误分为输入、供应商、生成格式、构建、预览、检查六类。
+- 明确显示“结果未知”，不要转圈后默默重试。
+
+### 11.3 结果区
+
+- 原图/设计预览与生成页面并排；Spec 模式展示需求条目。
+- 视口切换、源码查看、候选差异。
+- 检查结果及对应截图/错误。
+- 一次修复按钮，额度耗尽后禁用并说明原因。
+- 导出源码、报告和问题清单。
+
+## 12. 配置与导出
+
+### 12.1 单一 `.env`
+
+按用户偏好，实际本机配置统一保存在 `D:\desktop\AI\D2C\Design2Code\.env`，可以包含模型与 Figma 凭据。后端显式加载该文件；Vite 只使用启动所需公开端口设置，不向浏览器注入秘密。三个上游的 `.env` 示例仅作字段参考，不分别维护实际配置。
+
+所有需要手动填写的运行配置集中在这一个文件：中转 API 地址、key、接口协议、模型名称、可选 Figma 凭据、应用与预览端口、runtime 路径、输入限制、检查视口、超时、调用和 token/费用上限。完整模板与填写说明只在 18.16 维护，其他文档引用该节，不再提供容易漂移的第二份配置表。
+
+不使用 `.env.local`、`.env.development` 等后缀，不在三个上游目录分别维护实际配置。截图、Spec、Figma 页面链接与本次生成指令属于任务资料，在工作台中输入并由 SourceSet 保存；模型/Figma 服务的连接参数统一来自根 `.env`。
+
+实施时适配上游变量名，避免维护两套同义变量。秘密变量不能使用会被前端打包的 `VITE_` 前缀；`.env` 加入忽略和导出排除列表，启动诊断只报告字段是否齐全，不打印值。
+
+### 12.2 ZIP 内容
+
+- 固定候选的源码、模板和 lockfile。
+- 本地静态资源及必要来源/使用说明。
+- README：安装、启动、已实现功能、已知限制。
+- `report.json` / `report.html`：适用检查、结果、失败原因。
+- 截图、源码差异和内容哈希索引。
+- 输入类型集合、资料集合版本和摘要、逐项来源映射、冲突结论、模板和规则版本、实际用量与费用是否已核实。
+
+不包含 `.env`、访问令牌、模型原始秘密配置、宿主绝对私有路径或旧项目数据库。对用户设计原稿是否一起导出提供明确选项，不默认公开原始 Figma 文件资料。
+
+## 13. 分阶段执行任务与完成条件
+
+以下是实施顺序，不是已经完成的工作。时间只能在底座运行和兼容性摸底后估算，暂不承诺固定日期。
+
+### 阶段 0：锁定底座与可行性验证
+
+任务：
+
+1. 核验已存在的 `Design2Code/screenshot-to-code` 来源、提交和许可证，不重复克隆。
+2. 记录固定 commit，读取其开发约束及依赖清单。
+3. 检查环境和启动命令，不直接搬用旧工程环境。
+4. 在不调用供应商的条件下启动界面、验证接口和固定输出样例。
+5. 梳理所有可能触发模型/图片服务请求的入口。
+6. 选择统一调用入口、模板包装方案和本地 runner。
+
+交付：上游基线记录、可启动应用、复用/新增模块清单、调用路径清单。
+
+完成条件：明确“直接复用什么、必须改什么”；没有付费调用也能检查本地环境；不需要第二套完整服务架构。
+
+### 阶段 1：截图与 Spec 的最小生成链
+
+任务：
+
+1. 完成固定 React/Vite 模板及结构化文件输出协议。
+2. 实现 ScreenshotAdapter、SpecAdapter 与输入摘要。
+3. 实现供应商统一调用、预算记录和输出校验。
+4. 实现候选落盘、固定构建、受控预览。
+5. 在用户确认本次调用配置后，分别运行截图和 Spec 各一个真实样例。
+
+交付：输入 → 生成 → 构建 → 预览的可运行链，以及失败报告。
+
+完成条件：两种输入至少各有一个可启动工程；代码来源、模型调用和候选可追踪；不能只在 iframe 中显示一段 HTML 就算工程化完成。
+
+### 阶段 2：通用检查与一次修复
+
+任务：
+
+1. 实现类型、构建、控制台、资源和布局检查。
+2. 接入三档视口截图和并排对比。
+3. 为 Spec 的首批交互类型实现固定测试模板。
+4. 实现失败反馈、一次修复、新候选与全量复验。
+5. 验证双击修复、取消、超时、供应商结果未知和预算耗尽。
+
+交付：检查报告、一次修复记录、回归测试。
+
+完成条件：能拒绝坏候选；修复不会覆盖旧记录或增加隐式调用；没有参考图时不伪造视觉分数。
+
+### 阶段 3：Figma 指定节点接入
+
+任务：
+
+1. 核对当前官方接口及实际账号权限。
+2. 完成节点链接解析、授权读取、渲染图与资源下载。
+3. 实现 FigmaAdapter 与来源快照。
+4. 复用阶段 1、2 的生成、检查、修复链，不再写第二套流程。
+5. 测试无权限、节点不存在、资源失效、限流与设计版本变化。
+
+交付：Figma 节点 → 同一 DesignBrief → 可运行工程。
+
+完成条件：至少一个真实可访问节点通过整个链；导出图片输入与直接节点接入在界面和报告中明确区分。
+
+### 阶段 4：交付、复现和样例评测
+
+任务：
+
+1. 完成 ZIP、报告、资源引用和敏感内容排除。
+2. 在新的工作目录按 README 启动导出工程。
+3. 增加任务历史和断线事件补齐。
+4. 整理至少 9 个固定样例：截图、Spec、Figma 各 3 个。
+5. 使用相同输入、模型、模板和调用上限比较首次生成与修复后结果。
+6. 录制演示并完善开源来源、个人改动与已知限制说明。
+
+交付：可复现的个人项目、真实案例、评测记录和演示资料。
+
+完成条件：三种输入均有证据；小样本中失败、未知和未执行均如实展示；不把 9 个样例的结果推广成任意页面成功率。
+
+## 14. 测试用例与验证方法
+
+### 14.1 单元测试
+
+- 图片类型/大小/解码、Spec 空输入、Figma 链接解析。
+- DesignBrief 校验、来源标记和输入摘要。
+- 输出协议解析、路径穿越、重复文件和超大输出。
+- 预算预留/结算、请求幂等、修复上限。
+- 检查适用性、分母统计、候选摘要绑定。
+- 导出排除 `.env`、ZIP 路径和哈希校验。
+
+### 14.2 集成测试
+
+- 固定模型响应进入候选目录、真实构建和浏览器预览。
+- 构建失败、缺图、运行异常、端口冲突和进程清理。
+- SQLite 状态与文件内容一致，崩溃后不重复发送模型请求。
+- Figma 网络响应使用受控样例测试权限/限流分支；真实文件另测。
+- 用 mock provider 验证请求次数边界，但不把它算作真实模型生成。
+
+### 14.3 真实 E2E 与评测
+
+- 截图：落地页、仪表盘、设置页等不同布局。
+- Spec：任务列表、表单、内容筛选页等可交互页面。
+- Figma：具有 Auto Layout、图片资源和嵌套结构的指定节点。
+- 记录首次构建成功、最终构建成功、适用交互通过情况、人工视觉结论、修复次数、总耗时和实际 token。
+- 未拿到确定账单时只展示估算费用及口径，不宣称精确成本。
+- 不额外增加一轮模型“裁判”来美化结果；如引入，必须计入预算并说明裁判局限。
+
+### 14.4 项目完成定义
+
+只有以下事项均满足，才称“个人 Design2Code 第一版完成”：
+
+- 三种输入单独使用、图片 + Spec、Figma + Spec、图片 + Figma + Spec 均可走通到固定技术栈工程；组合验收见 19.4。
+- 有受控自动构建、预览、检查及一次修复能力，或明确披露未自动化的边界。
+- 有真实供应商运行记录，而不是只有 mock/fixture。
+- 有失败拦截案例、完整修复回归和导出后复现结果。
+- 配置、运行、停止和问题定位文档可由用户照着执行。
+- 已知限制与未支持场景可见；无生产上线主张。
+
+## 15. 最容易踩的坑与处理决策
+
+1. **三个开源工程整套融合。** 首版仅一个主底座，另外两个作为能力参考。
+2. **先接 Figma、再做任何生成。** 先用截图/Spec 验证执行链，Figma 仅增加输入适配。
+3. **只得到好看的单文件预览。** 优先固定可构建工程模板和导出复现。
+4. **一次操作包含多次付费请求。** 在最低供应商调用边界计数并禁止隐式重试。
+5. **截图中没有的信息靠模型猜测后当真。** 记录假设，区分设计事实与推断。
+6. **把视觉相似当作功能正确。** 两类检查分开报告。
+7. **为了通用而删掉全部验收。** 改为按输入与需求选择适用规则，而不是取消验证。
+8. **直接移植旧工程全部治理。** 只迁移能独立证明价值的模块；旧任务状态原样保留。
+9. **把本地隔离目录当作安全执行环境。** 在自动执行生成代码之前落实 runner 隔离。
+10. **先清理旧代码再验证新路线。** 新版可复现之后再讨论归档，避免失去参考和回退材料。
+
+## 16. 下一次实施应从哪里开始
+
+先做阶段 0，不直接把三种输入、自动修复、导出和可视化编辑同时展开。
+
+第一批工程任务按顺序是：
+
+1. 使用已拉取的 `screenshot-to-code` 仓库建立开发分支，记录源码基线。
+2. 给出当前环境和依赖安装清单，检查本机已有工具。
+3. 启动前后端，用固定输出验证预览，不调用模型。
+4. 找出最小可复用的生成入口及全部隐式请求路径。
+5. 固定模板、输出协议和隔离 runner 方案。
+6. 给出一次真实样例所需的模型、请求次数和预算，再开始真实生成。
+
+用户现阶段只需准备：一张有权使用的页面截图、一段简单 Spec；Figma 样例可在阶段 3 前再提供。无需为开始这个新项目先补齐旧电商项目的部署身份和审批材料。
+
+## 17. 本文的事实与变更边界（初始基线）
+
+本节记录方案编写时的初始状态。当前实现状态以文末“2026-11-10 文档与环境同步记录”为准。
+
+- 已完成：三个仓库 SSH 克隆、来源/提交核对，以及独立本地演示服务的创建。
+- 已核对：主底座输入、WebSocket、Agent、ProviderSession、预览、上传资源和导出源码；Figma 插件消息与转换入口；Onlook preload、Penpal 和 AST 修改入口。
+- 当时尚未完成：主底座依赖安装和浏览器联调、真实模型、Figma 读取、工程构建、一轮修复和统一导出；这些项目后续已分批推进，仍未完成的部分在文末明确列出。
+- 当时的演示服务没有截图粘贴能力；当前主工作台已提供截图选择、拖放和 Ctrl+V 入口，旧演示壳仍不作为验收入口。
+- 此文中的新增 API、目录、协议、状态与模块均为实施设计；下文示例中的 ID 和哈希仅为协议示例，不是实际业务记录。
+- 本轮仅更新本文件。所有真实秘密配置仍由唯一 `.env` 提供，不写入本文。
+
+## 18. 各部分接口对接与集成实施细则
+
+本节是开发时的接口手册。路径从 `Design2Code/` 开始；标为“已有”的文件已在本机源码中核对，标为“新增”的文件和协议需要实际实现。示例均使用无秘密的演示值。
+
+### 18.1 集成后的运行关系与入口切换
+
+对应第 1、2、4 节。
+
+首版只启动两项应用服务：React/Vite 前端和 FastAPI 后端。任务执行器作为后端单进程内的一个顺序队列运行；同一后端只能启动一个执行者，启动参数固定 `workers=1`。生成页面由隔离 runner 的独立端口提供预览。
+
+建议端口：
+
+| 用途 | 地址 | 如何使用 |
+| --- | --- | --- |
+| 主工作台 | `http://localhost:5173` | 用户打开的唯一主界面 |
+| FastAPI | `http://127.0.0.1:7001` | Vite 在开发环境代理 HTTP/WS |
+| 候选预览 | 由 runner 分配本机端口 | 后端返回 preview URL，前端 iframe 加载 |
+| 旧演示壳 | `http://127.0.0.1:8787` | 迁移期间保留历史入口，不参与新版任务链 |
+
+端口可由根目录 `.env` 覆盖；预览 origin 要与工作台分开，后端根据实际启动的 runner 记录验证预览地址。
+
+已有主入口：
+
+- `screenshot-to-code/frontend/src/App.tsx`：工作台组件装配。
+- `screenshot-to-code/frontend/src/components/unified-input/UnifiedInputPane.tsx`：上传、URL、文本、代码导入入口。
+- `screenshot-to-code/frontend/src/generateCode.ts`：原 `/generate-code` WebSocket 客户端。
+- `screenshot-to-code/backend/main.py`：环境加载、FastAPI 实例与路由注册。
+- `screenshot-to-code/frontend/vite.config.ts`：已有 `/api`、`/generate-code`、`/local-assets` 代理。
+
+新增后端入口：`backend/design2code/api/router.py`，声明统一前缀 `/api/d2c/v1`。在 `main.py` 中注册 router，并在 lifespan 中启动/停止唯一任务执行者。新增代码放进主仓库内部，不通过 `sys.path` 或跨仓库相对导入依赖另两个仓库。
+
+新增前端入口：`frontend/src/features/design2code/`，内部放 API 客户端、运行 Store、输入摘要、检查报告等组件。原上传、代码编辑、预览外观可以继续复用；生成按钮由新的 `createRun()` 驱动。
+
+关键规则：新版页面创建 Run 后，只订阅事件；不再同时调用原 `generateCode()` 触发第二次模型执行。旧接口可以保留供上游功能使用，但首版产品按钮只能走一条调用路径。
+
+实际切换步骤：先启动上游原界面并确认静态资源、代理和健康接口；接入新版输入与任务接口；最后让主界面默认进入新版流程。浏览器端验证通过后再更改 README 的默认启动入口。
+
+### 18.2 跨模块契约与数据归属
+
+对应第 5、6、7、9 节。
+
+建议在 `backend/design2code/contracts/` 定义 Pydantic 模型：`inputs.py`、`brief.py`、`runs.py`、`generation.py`、`checks.py`、`events.py`。前端在 `features/design2code/contracts.ts` 使用同版本类型；可由受控脚本导出 JSON Schema，再生成或核对 TypeScript 类型。
+
+统一使用以下标识：
+
+- `input_id`：原始资料及其资源快照，输入内容不可变。
+- `source_set_id + source_set_revision + source_set_hash`：本次组合的输入引用、资料用途、指令与冲突结论；单输入同样通过资料集合进入 Run。
+- `brief_id + brief_revision + brief_hash`：用户补充信息后的生成说明；修改需新 revision。
+- `run_id`：一次完整任务；一个 Run 可产生多个候选。
+- `candidate_id + candidate_hash`：某一组完整源码、资源和模板的固定快照。
+- `check_plan_hash`：生成前确定的适用检查清单。
+- `call_id`：一次实际供应商请求，关联 run、阶段与用量。
+- `seq`：某个 Run 内递增的事件序号，与供应商事件 ID 无关。
+
+输入接口返回的简化对象：
+
+```json
+{
+  "input_id": "inp_demo_01",
+  "input_type": "screenshot",
+  "source_hash": "sha256:<服务端计算的完整摘要>",
+  "assets": [
+    {
+      "asset_id": "asset_demo_01",
+      "role": "reference",
+      "mime_type": "image/png",
+      "width": 1440,
+      "height": 900,
+      "url": "/api/d2c/v1/assets/asset_demo_01"
+    }
+  ],
+  "status": "READY",
+  "warnings": []
+}
+```
+
+后端掌握文件路径、哈希、模型身份、实际调用次数和状态。前端只能提交输入、说明与允许的操作，不能上传 `PASS`、账单、文件绝对路径或自行计算的“权威候选摘要”。
+
+文件摘要包含模板版本、源码与本地资源摘要，按规范化路径排序后计算。构建结果另有 `build_hash`，避免源码哈希与构建哈希混为一谈。
+
+统一错误对象：
+
+```json
+{
+  "error": {
+    "code": "INPUT_INVALID_IMAGE",
+    "message": "无法读取图片，请重新选择 PNG 或 JPEG 文件。",
+    "request_id": "req_demo_01",
+    "retryable": false,
+    "details": { "field": "files" }
+  }
+}
+```
+
+HTTP 状态建议：400 请求格式错误；404 输入/任务不存在；409 状态冲突或幂等键内容不同；413 输入过大；422 可解析但不支持的内容；429 Figma 读取限流或本地输入频率限制；503 缺少配置/runner。供应商已受理后的运行失败写入 Run 状态，不把 HTTP 重试变成另一次收费操作。
+
+### 18.3 截图选择、拖拽、Ctrl+V 如何接入
+
+对应第 5.2、11.1 节，也是当前用户要求的截图粘贴入口。
+
+**已有落点：**`frontend/src/components/unified-input/tabs/UploadTab.tsx` 内已有 `handleAddFiles`、react-dropzone 和预览资源释放逻辑。当前源码未发现该入口的图片粘贴监听，应补入同一文件处理链。
+
+**新增落点：**`features/design2code/inputs/useScreenshotInput.ts`、后端 `design2code/inputs/screenshot.py`。
+
+浏览器处理顺序：
+
+1. 文件选择/拖拽得到 `File[]`；粘贴从 `ClipboardEvent.clipboardData.items` 提取图片，转成 `File`。
+2. 三个入口统一调用 `acceptScreenshot(file)`，避免粘贴绕过类型、大小和数量限制。
+3. 每个文件单独保存为输入；同一资料集合最多 3 张 PNG/JPEG。替换时释放旧 Object URL，用新 input_id 更新资料集合并使原 Brief 确认失效，不覆盖已运行任务的输入。
+4. 使用 Object URL 显示缩略图，支持删除/替换，显示实际宽高和字节大小。
+5. 图片粘贴可以在 Spec 文本框内处理，但只有剪贴板确含图片时才阻止默认事件；普通文字照常粘贴。监听在组件卸载时解除，避免一个粘贴动作上传两遍。
+6. 按“生成”或“解析输入”时，使用 `FormData` 上传原始文件；不要只上传文件名。
+
+请求约定：
+
+```text
+POST /api/d2c/v1/design-inputs
+Content-Type: multipart/form-data; boundary=浏览器自动设置
+
+input_type = screenshot
+files = <真实图片文件>
+supplemental_spec = 按钮打开详情弹窗；窄屏改为单列
+```
+
+前端调用示意：
+
+```ts
+const data = new FormData();
+data.set("input_type", "screenshot");
+data.set("files", file, file.name);
+data.set("supplemental_spec", supplementalSpec);
+const response = await fetch("/api/d2c/v1/design-inputs", {
+  method: "POST",
+  body: data,
+});
+```
+
+不要手动设置 multipart 的 Content-Type，否则可能缺失 boundary。上游后端依赖清单未声明 `python-multipart`，实现该接口时需要按 Poetry 工作流加入并更新锁文件，不能仅写一个 `UploadFile` 参数就认为接口能启动。
+
+服务端：限制总字节与解码像素 → Pillow 实际解码 → 记录尺寸/格式/摘要 → 保存原图 → 必要时生成模型用副本 → 写 input/asset 元数据 → 返回输入摘要。像素上限和字节上限为可配置工程限制，先给保守默认，再用样例调整。
+
+模型副本缩放属于服务端确定性处理，不额外占模型调用。保存 `original_size`、`model_size`、缩放比例和副本 hash；视觉对比仍使用固定原始参考视口。
+
+主底座 `backend/uploaded_assets/store.py` 已有 data URL 解析、摘要和临时资源提升逻辑，可复用其图像解析与存储思路，但新增输入仍需关联 input_id/run_id；不能只保存在上游全局资源目录就称为任务快照。
+
+资源接口：`GET /api/d2c/v1/assets/{asset_id}`，仅按数据库中可信引用读取文件，返回正确 MIME 与 `X-Content-Type-Options: nosniff`。不要直接挂载整个 runtime 目录。
+
+联调条件：剪贴板图片、文件选择、拖拽各成功一次；损坏图片、过大图片、普通文本粘贴、删除后再生成均行为明确。报告应能证明真实图片 bytes 已保存，不能只显示“截图已记录”。
+
+### 18.4 Spec 文本与 Markdown 如何接入
+
+对应第 5.3、9.3 节。
+
+**已有落点：**`TextTab.tsx` 已通过 `doCreateFromText(text)` 发起文本生成。复用编辑输入外观，将回调替换成新版输入保存与 Run 创建。
+
+**新增落点：**`design2code/inputs/spec.py`、`features/design2code/inputs/SpecInput.tsx`。
+
+与图片接口共用一个 multipart 协议：
+
+```text
+POST /api/d2c/v1/design-inputs
+
+input_type = spec
+spec_text = # 任务管理\n- 搜索任务\n- 状态筛选\n- 新建任务弹窗
+```
+
+上传 `.md` 时使用 `files` 字段；同一请求中 `spec_text` 和 Markdown 主文件只能选一个作为主内容。`supplemental_spec` 可作补充。后端拒绝空内容，统一为 UTF-8，并保留原文；解析出的结构是附加结果，不能覆盖原始 Spec。
+
+Brief 确认接口，截图、Figma 与组合资料也复用；先按 18.20 创建 SourceSet：
+
+```text
+PUT /api/d2c/v1/source-sets/{source_set_id}/brief
+If-Match: "<当前 brief_hash>"
+```
+
+```json
+{
+  "source_set_revision": 1,
+  "source_set_hash": "sha256:<当前资料集合摘要>",
+  "title": "任务管理页面",
+  "supplemental_spec": "所有数据为本地演示数据",
+  "interactions": [
+    {
+      "id": "SPEC-DIALOG-01",
+      "kind": "dialog_open",
+      "trigger": { "role": "button", "name": "新建任务" },
+      "expected": { "role": "dialog", "name": "新建任务" }
+    }
+  ],
+  "responsive_rules": ["390px 下列表改为单列"]
+}
+```
+
+后端返回新的 brief_revision/hash 和检查计划摘要；前端如果拿着旧 hash 保存，返回 409，提示刷新摘要。Spec 的每个明确条目分配稳定 ID，`interactions.kind` 只接受已支持的动作枚举；复杂自然语言保留为人工检查条目。
+
+在同一个 Run 内 Brief 不可再改。用户改需求创建新的 Run，避免修复阶段顺便改变验收标准。
+
+联调条件：同一 Spec 的原文、Brief、检查项可相互定位；文本框中普通粘贴不丢字；未支持自动化的条目不被计为自动通过。
+
+### 18.5 Figma 官方接口如何接入
+
+对应第 5.4 节。主路径为 FastAPI 后端读取官方数据，不在浏览器中发 Figma token。
+
+**新增落点：**`design2code/inputs/figma_client.py`、`figma_normalizer.py`、前端 `FigmaInput.tsx`。
+
+应用请求：
+
+```text
+POST /api/d2c/v1/design-inputs/figma
+Content-Type: application/json
+```
+
+```json
+{
+  "url": "https://www.figma.com/design/DEMO_FILE/Page?node-id=12-34",
+  "supplemental_spec": "点击保存后展示成功提示"
+}
+```
+
+后端解析主机、文件 key 和 node-id。只接受已明确支持的 Figma 文件 URL；对常见 URL node-id `12-34` 规范为接口节点 ID `12:34`，保留原始值；不能把任意字符串中的所有连字符无差别替换。
+
+FigmaClient 的实际请求：
+
+1. `GET https://api.figma.com/v1/files/{file_key}/nodes?ids={node_id}`：读取指定节点与文件版本。
+2. `GET https://api.figma.com/v1/images/{file_key}?ids={node_id}&format=png&scale=1`：获取该节点参考渲染图的下载地址。
+3. 如节点包含 image fill，按需要使用 `GET /v1/files/{file_key}/images` 获取图片资源映射，再只下载被选中子树引用的资源。
+
+以上是官方现有 API，应用的 `/api/d2c/v1/...` 则为拟新增路由；节点映射可返回 null，必须按节点缺失处理。[Figma 文件接口文档](https://developers.figma.com/docs/rest-api/file-endpoints/)
+
+个人项目使用已配置的个人访问 token 时，由后端写 `X-Figma-Token`；OAuth 路径单独使用 Bearer token。需要的文件内容读取权限与实际账号文件访问权限均由官方规则决定。[认证与权限文档](https://developers.figma.com/docs/rest-api/authentication/)
+
+节点字段映射：
+
+| Figma 来源字段 | DesignBrief 内容 | 处理方式 |
+| --- | --- | --- |
+| `id`、`name`、`type` | section/node 来源 | 保留 ID，不能作为宿主文件路径 |
+| `absoluteBoundingBox` | 初始视口与矩形信息 | 画布绝对坐标转相对根节点坐标 |
+| `layoutMode`、padding、`itemSpacing` | 布局规则 | HORIZONTAL/VERTICAL 映射 flex 方向，不能强制一律 absolute |
+| `characters`、`style` | 文案与字体属性 | 字体不可用时记录替代与警告 |
+| `fills`、`strokes`、圆角等 | 设计 token 与样式 | 记录精确原值及来源 |
+| image references | assets | 下载为内容寻址的本地文件 |
+| component/instance 信息 | 组件参考 | 没有代码映射时仅作提示，不声称复用了既有 React 组件 |
+
+读取和渲染应尽可能固定同一版本；检查所选 endpoint 是否支持 `version`，支持时传入已取得的版本。无法确保参考图与节点 JSON 属于同一版本时，重新获取一致快照或报告不一致，不能混用后继续计算视觉结论。
+
+输入读取可能较慢，建议该路由返回 202 与 input_id，输入状态为 `IMPORTING`，通过 `GET /design-inputs/{id}` 查询；读取完成变 `READY`，失败记录在输入上。只有全部纳入来源 READY、Brief 已确认的 SourceSet 能创建 Run。此时还没有模型调用。
+
+对权限错误、缺节点、无渲染图分别返回 `FIGMA_FORBIDDEN`、`FIGMA_NODE_NOT_FOUND`、`FIGMA_RENDER_UNAVAILABLE`。429 返回可展示的 next_allowed_at/等待秒数；遵循官方 `Retry-After`，不在界面刷新时持续重复读取。[Figma 限流文档](https://developers.figma.com/docs/rest-api/rate-limits/)
+
+联调条件：一个真实选中 Frame 的 JSON、参考图、本地资源、version 和 input_id 可绑定；无权限链接不会创建可生成输入；同一输入刷新页面不重新下载全部设计文件。
+
+### 18.6 FigmaToCode 的代码和导出能力怎么衔接
+
+对应第 2.2 节。它不是 HTTP 微服务；`packages/backend` 这个目录名不代表 FastAPI 可以直接调用。
+
+已确认的源码入口：
+
+- `apps/plugin/plugin-src/code.ts`：`figma.ui.onmessage`、`download-project`、`get-selection-json`。
+- `packages/backend/src/code.ts`：`run(settings)`，内部访问 `figma.currentPage.selection`。
+- `packages/backend/src/altNodes/jsonNodeConversion.ts`：`nodesToJSON`，依赖真实插件节点能力。
+- `packages/backend/src/index.ts`：导出 `htmlMain`、`tailwindMain`、`generateProjectZip` 等。
+- `packages/types/src/types.ts`：`ConversionMessage`、`ProjectZipMessage` 和 `PluginSettings`。
+- `manifest.json`：当前插件网络配置为 `allowedDomains: ["none"]`。
+
+因此优先采用文件级连接，步骤如下：
+
+1. 用户在 Figma 插件中选中 Frame，通过插件已有下载功能导出 Vite/HTML 等项目。
+2. 新版工作台增加“导入 Figma 项目包”，调用拟新增 `POST /api/d2c/v1/design-inputs/figma-bundle`，使用 multipart 上传 ZIP 和可选参考 PNG。
+3. 后端在临时目录检查 ZIP：条目数、展开体积、路径、重复名称、符号链接和不支持文件；不运行包里的安装脚本。
+4. 读取允许的源码/资源，形成 `ReferenceProject`，记录原始 ZIP hash、导出工具、格式与警告。
+5. 将它作为种子代码传给固定 React 模板包装器；只在文件格式兼容时直接采用，否则作为参考输入参与模型生成。
+6. 报告保留“插件转换”“模型新增”“用户补充”的来源，后续与通用构建、检查和导出共用流程。
+
+仅导出的 ZIP 通常不包含完整设计语义树和检查参考图；缺什么字段就记录缺口，不因来自 Figma 插件自动标为视觉验收完备。
+
+若后续直接二开插件：保持当前无网络边界，新增“导出 Design2Code 资料包”按钮，把标准 JSON、参考 PNG、资源和可选 JSX 放入 ZIP；由用户在工作台上传。插件 UI 与主线程通过 `parent.postMessage({pluginMessage: ...}, "*")` 和 `figma.ui.postMessage(...)` 通信，不能把它等同于普通网页直接访问后端。
+
+上游已有消息：UI 发 `download-project`，插件回 `project-zip`/`project-download-error`；`get-selection-json` 对应 `selection-json`。新增本项目消息应使用独立名称和 request_id，不能改变已有消息语义。直接做插件源码复用与分发时，保留来源并先明确 GPL-3.0 的项目采用方案；本阶段默认只把资料包作为输入。
+
+REST JSON 与插件 SceneNode 不是同一种对象，不能直接将 REST 响应传入 `nodesToJSON`；如确需纯 Node 转换服务，必须提取不依赖 figma 全局对象的中间表示与转换器，并补齐其测试，这是单独工作项。
+
+联调条件：导入一个真实插件导出包可以成为可追踪输入；恶意/损坏 ZIP 明确拒绝；导入过程无安装、无生成费用；缺少参考图时检查适用性正确。
+
+### 18.7 供应商生成入口如何接入与收口
+
+对应第 2.1、6、10 节。
+
+原有链路：`generateCode.ts` → `WS /generate-code` → Pipeline → `AgenticGenerationStage.process_variants()` → `Agent.run()` → `AgentEngine` → `ProviderSession.stream_turn()` → 供应商 SDK。
+
+本项目链路：`POST /runs` → RunService → 单执行者 → `GenerationProvider.generate()` → 供应商 session → 结构化 GenerationResult → 候选固化。前端 WS 仅接收事件。
+
+新增接口形状：
+
+```python
+class GenerationProvider(Protocol):
+    async def generate(
+        self,
+        request: GenerationRequest,
+        emit: Callable[[GenerationEvent], Awaitable[None]],
+    ) -> GenerationResult: ...
+```
+
+GenerationRequest 包含：run_id、call_id、purpose（generate/repair）、固定 Brief、参考图/资源、模板版本、当前候选（修复时）、失败反馈、预算和取消信号。它不携带来自浏览器的 API key 或任意供应商 URL；供应商配置从后端 Settings 注入。
+
+具体适配文件：
+
+- 新增 `design2code/generation/provider.py`：领域接口。
+- 新增 `single_shot.py`：一次请求产生一个文件集合。
+- 复用/适配 `agent/providers/base.py` 的 stream event 和 ProviderTurn 结构。
+- 对 `agent/providers/factory.py` 增加显式 policy 或由新增工厂直接构建所选 session。
+- 第一版只实现实际使用的一家供应商；其他 session 不在菜单中虚假显示“已支持”。
+
+首版选择一次结构化生成路径：tools 为空，调用一次 `stream_turn()`，取最终 assistant_text，按 GenerationResult Schema 解析。`stream_turn` 内部对不同模型/参数的兼容需实测；现有 OpenAI session 使用 Responses 路径，不是任意 Chat Completions 代理都能兼容。中转协议由根 `.env` 的 `D2C_API_PROTOCOL` 明确选择，字段契约见 18.16；若中转只支持 Chat Completions，应新增对应适配器，不能仅替换 base URL 或填写协议字段就承诺可用。
+
+现有 factory 会自动开放可用的图片编辑/资源提取/截图工具，因此新工厂必须显式控制 tool policy；仅传 `should_generate_images=False` 不足以关闭所有工具。空工具时还要适配工具选择字段，不能无条件保留不兼容的 `tool_choice`。
+
+每次实际网络请求之前：原子预留 request slot、token/费用额度 → 写 provider_calls 的 `PREPARED` → 标记 `SENT` → 调 SDK → 收到结果写 `SUCCEEDED`/`REJECTED`/`UNKNOWN` → 结算实际 usage。超时发生在发送后时保留 UNKNOWN，不补发。preflight 未发请求就失败可释放预留额度。
+
+上游 OpenAI session 当前写死 `max_output_tokens=50000`，新版需按所选模型允许的参数传入；用户当前未设置 token/费用上限，不以缺少价格拦截生成。供应商未返回价格或账单时，费用显示未知，不能把未知当作零费用。
+
+SDK 自带重试、重连、模型 fallback、图片生成和视觉裁判均需纳入调用审计。首版关闭自动重试/多候选/额外工具循环；请求上限来自后端确认的 RunPolicy，客户端只能申请更低额度。
+
+用量适配需补充统一 `UsageReceipt`：request_id（若有）、model、input_tokens、output_tokens、cached/reasoning 字段（若有）、计价版本、估算费用、账单确认状态。上游 `total_cost_usd()` 可能返回 None，缺少价格时不得把 None 当 0。
+
+联调条件：mock transport 断言首次生成只产生一次供应商 HTTP 请求；真实供应商样例另行执行；不支持协议、未知模型、额度耗尽在发请求前明确失败；流式中断后不会创建第二个 call_id 自动重试。
+
+### 18.8 从生成结果到固定 React 工程怎么接
+
+对应第 6 节。
+
+已有 `AgentFileState` 只有 `path/content`，默认 `index.html`；`setCode` 流中也可能是半截输出。这与多文件 React 工程不同，需要增加工程结果契约。
+
+建议 GenerationResult：
+
+```json
+{
+  "schema_version": "d2c.generation.v1",
+  "target_template": "react-vite-v1",
+  "entrypoint": "src/App.tsx",
+  "files": [
+    { "path": "src/App.tsx", "content": "export default function App() { return <main>Demo</main>; }" },
+    { "path": "src/styles.css", "content": "@tailwind base;\n@tailwind components;\n@tailwind utilities;" }
+  ],
+  "asset_refs": [],
+  "requirement_mapping": [
+    { "requirement_id": "SPEC-DIALOG-01", "files": ["src/App.tsx"] }
+  ],
+  "assumptions": []
+}
+```
+
+此处样例只演示协议，不能证明功能已实现。字段使用 Pydantic 校验，并校验路径/体积/数量、默认导出、允许 imports、assets 和固定依赖集合。
+
+新增文件：`generation/parse_result.py`、`workspace/candidate_writer.py`、`workspace/template.py`。
+
+包装过程：
+
+1. 固定模板中提供 package.json、lockfile、index.html、main.tsx、tsconfig、Vite/Tailwind 配置。
+2. 将经过校验的 src 文件和资源写入临时候选目录。
+3. 模型引用资源使用稳定 `/assets/<id>.<ext>`；包装器映射到 `public/assets/`。
+4. 生成 candidate manifest；资源、模板和源码均计入摘要。
+5. 临时目录原子发布为 c001/c002，SQLite 关联 candidate_hash 与状态。
+6. 只有完整输出解析并发布成功后发送 `candidate.created`；流式 chunk 仅作界面进度。
+
+上游 HTML Prompt 与我们的 JSON 文件输出 Prompt 不能混用。`backend/prompts/pipeline.py` 可复用输入消息构造机制，但固定输出协议提示需由新增 `design2code/generation/prompts.py` 单独负责。
+
+不要使用正则把任意 HTML 中的 script 自动改成 TSX；无法可靠转换的旧 HTML 只走标明格式的兼容导入路径，不进入“React 工程已构建成功”的统计。
+
+上游 `Stack.REACT_TAILWIND` 值为 `react_tailwind`，不是我们的模板 ID。新增 `target_template` 字段处理两者的映射，不把模板名硬塞进上游枚举导致前后端校验不一致。
+
+联调条件：固定 JSON 样例可成为真实可构建工程；无效 JSON、输出截断、重复路径、越界路径和未批准依赖均在执行前可解释失败；输入文件和旧候选不会被覆盖。
+
+### 18.9 创建任务、SQLite、幂等与取消怎么接
+
+对应第 7 节。新增 `application/run_service.py`、`storage/sqlite.py`、`execution/worker.py`；目录均位于 `backend/design2code/` 内。
+
+创建请求：
+
+```text
+POST /api/d2c/v1/runs
+Idempotency-Key: create-demo-001
+Content-Type: application/json
+```
+
+```json
+{
+  "source_set_id": "srcset_demo_01",
+  "source_set_revision": 1,
+  "source_set_hash": "sha256:<固定资料集合摘要>",
+  "brief_id": "brief_demo_01",
+  "brief_revision": 2,
+  "brief_hash": "sha256:<当前说明摘要>",
+  "target_template": "react-vite-v1",
+  "requested_limits": { "model_requests": 2, "repairs": 1 },
+  "execution_mode": "generate_and_check"
+}
+```
+
+响应 202：
+
+```json
+{
+  "run_id": "run_demo_01",
+  "status": "CREATED",
+  "state_version": 1,
+  "check_plan_hash": "sha256:<固定检查计划摘要>",
+  "events_url": "/api/d2c/v1/runs/run_demo_01/events?after_seq=0",
+  "stream_url": "/api/d2c/v1/runs/run_demo_01/stream?after_seq=0"
+}
+```
+
+RunService 在事务中核对 SourceSet 版本/hash、所有纳入来源 READY、Brief 绑定同一资料集合版本且已确认、阻断冲突已解决、模板存在、运行模式和调用配置可用，保存资料集合、Brief、实际 RunPolicy 与检查计划快照。相同幂等键且相同请求摘要返回原 run_id；相同键不同内容返回 409。首版已有活动任务时返回 `RUN_BUSY`，避免同时触发两个执行者。
+
+元数据表最小字段：
+
+| 表 | 核心字段 | 约束 |
+| --- | --- | --- |
+| inputs | id、type、status、source_hash、manifest_ref | 原始内容不可变；Brief 属于组合后的资料集合 |
+| source_sets | id、revision、source_set_hash、manifest_ref、created_at | `(id, revision)` 唯一；旧版本不可覆盖 |
+| briefs | id、revision、source_set_id、source_set_revision、source_set_hash、brief_hash、manifest_ref、confirmed_at | 确认仅对绑定的资料集合版本有效 |
+| runs | id、source_set_id、source_set_revision、source_set_hash、brief_hash、policy_json、check_plan_hash、status、state_version、idempotency_key、request_hash | 幂等键唯一，状态比较后更新 |
+| candidates | id、run_id、parent_id、manifest_ref、candidate_hash、build_ref、state | 同 run/revision 唯一 |
+| events | run_id、seq、type、candidate_id、payload_json、created_at | `(run_id, seq)` 唯一 |
+| checks | run_id、candidate_id、check_id、rule_version、status、evidence_ref | 按候选和规则版本定位 |
+| provider_calls | call_id、run_id、purpose、status、reserved limits、usage_json、provider_request_id | 调用状态和计数由服务端维护 |
+
+输入资源/Brief/check plan 可先以本地 JSON 文档配合表记录，不必每个字段再建一张表。文件引用一律在可信 runtime 根下解析。
+
+状态变更与对应事件在同一 SQLite 事务内提交。生成/构建这些慢动作在事务外执行；完成时检查 state_version 与取消标记再提交结果，避免任务已取消却被慢请求覆盖成成功。
+
+候选文件与数据库不能形成真正跨系统事务，采用“临时目录 → 完整 manifest → 原子发布目录 → 元数据提交”的顺序；崩溃后根据 manifest 和数据库重整。孤立完整目录不自动认作已交付候选，残缺目录不进入构建。
+
+`GET /runs/{id}` 返回当前状态、候选摘要、实际预算、最后 seq、preview URL、失败原因与 `allowed_actions`。前端按钮依据 allowed_actions 显示，后端仍独立校验。
+
+取消：`POST /runs/{id}/cancel` 幂等接受；标记取消 → 停止后续步骤 → 终止受管本地进程树 → 追加事件。供应商请求已发出且结果不明时，在 provider_calls 保留 UNKNOWN，Run 中显示外部调用未确认；不能把点击取消当作计费已撤销。
+
+重启恢复：未发供应商请求的任务可重新排队；已 SENT 无回执的调用进入 `UNKNOWN_EXTERNAL`；构建中断可在清理进程并校验候选后重建，重建不增加模型请求。状态由 SQLite 还原，不依赖浏览器一直开着。
+
+联调条件：重复提交、双击、进程退出和页面刷新均不重复收费；数据库中状态和事件一致；无法确定的供应商结果在 UI 可见。
+
+### 18.10 实时事件和上游 WebSocket 怎么衔接
+
+对应第 7.1、11.2 节。新增 `api/events.py`、`features/design2code/api/runEvents.ts`。
+
+上游已有消息为 `chunk`、`setCode`、`status`、`variantComplete`、`variantError`、工具事件等；这些消息没有本项目完整 Run 的持久化语义。上游 `eventId` 不能替代 Run 的递增 seq。
+
+本项目统一事件示例：
+
+```json
+{
+  "schema_version": "d2c.event.v1",
+  "run_id": "run_demo_01",
+  "seq": 12,
+  "type": "candidate.created",
+  "stage": "generating",
+  "candidate_id": "cand_demo_001",
+  "occurred_at": "2026-11-09T14:00:00Z",
+  "payload": { "file_count": 3, "candidate_hash": "sha256:<候选摘要>" }
+}
+```
+
+主要类型：`run.started`、`stage.changed`、`generation.delta`、`provider.call_finished`、`candidate.created`、`build.completed`、`check.completed`、`repair.started`、`run.ready_for_review`、`run.failed`、`run.cancelled`、`run.complete`。
+
+事件桥接原则：
+
+- assistant/chunk 可以转成批量节流的 generation.delta，仅用于展示。
+- `setCode` 可能多次出现且内容不完整，不直接转成 candidate.created。
+- `variantComplete` 只代表该模型生成结束，不代表构建、检查和人工查看完成。
+- 正常关闭原 WS 不直接转成 run.complete；异常断线也不默认取消后端任务。
+
+建议 `GET /events` 返回 `{events, next_seq, has_more}`，分页限制单次数量；WS 接收 after_seq 后从数据库顺序发送，接近实时末尾时等待通知再查库，不使用会漏掉注册窗口事件的“先拉历史、后订阅”实现。
+
+客户端记录已应用最大 seq，忽略重复事件；发现缺口先通过 GET 补齐，不创建新 Run。重连指数退避并在任务完成/组件卸载后关闭连接。一个 Run 只保留一个活动订阅。
+
+代码增量可以节流后保存在事件中，完整文件以候选 manifest 为准；首次刷新根据 `GET /runs/{id}` 读取状态和当前候选，再回放后续事件。不要在 Zustand 和 SQLite 各维护一套不可协调的完成真值。
+
+联调条件：断线期间任务继续；重新进入页面能补齐检查结果；重复事件不会重复追加候选；订阅断开不会再次调用模型。
+
+### 18.11 构建与预览 runner 的具体接口
+
+对应第 8 节。新增 `runner/protocol.py`、`runner/local_runner.py` 或选定的一种受管 runner 适配器；不要同时维护多套首版实现。
+
+接口草案：
+
+```python
+class BuildRunner(Protocol):
+    async def build(self, candidate: CandidateRef) -> BuildResult: ...
+    async def start_preview(self, build: BuildRef) -> PreviewHandle: ...
+    async def capture(self, preview: PreviewHandle, request: CaptureRequest) -> CaptureResult: ...
+    async def stop(self, handle: PreviewHandle) -> None: ...
+```
+
+CandidateRef 由服务端查询得到，包含 candidate_id/hash、可信工作目录和模板 ID。BuildResult 返回 exit_code、build_hash、日志引用、开始结束时间和错误摘要；PreviewHandle 返回受管进程 ID/引用、origin、readiness 与到期时间，不包含秘密环境变量。
+
+进程命令来自模板固定 scripts，执行参数列表而不是模型生成 shell。模板固定 Node/pnpm 版本与 lockfile；依赖环境在模板准备阶段建立，构建每个候选时无需重新联网安装全套依赖。
+
+构建命令建议分开记录类型检查和 bundle：`pnpm exec tsc --noEmit`、模板固定的 `pnpm run build`。命令是否重复类型检查由模板 scripts 明确定义。运行前验证工作目录、模板锁摘要、允许依赖和进程执行环境。
+
+预览使用构建后的静态 dist；固定静态服务和显式 host/port。readiness 检查既确认进程仍在运行，也确认页面资源能加载；不能拿到一个未监听端口就返回 preview.ready。
+
+上游 `preview_screenshot/ScreenshotBackend.capture(html, device, full_page)` 已支持单文件 HTML 截图，可作为兼容能力；它并不接收工程 build URL。多文件工程需要新增 CaptureRequest，明确 `url`、width、height、device_scale_factor、等待条件和动画策略，不强行把 URL 当 HTML 传进去。
+
+上游后端视口是 desktop `1280×832`、mobile `342×684`；前端 PreviewComponent 的桌面宽度是 1366，与本项目 1440/768/390 计划不一致。应在本项目统一 viewports 配置，由预览、采集、报告同时读取，不能沿用设备标签却测了不同尺寸。
+
+Playwright 采集应包含：实际 viewport、完整截图、控制台 error、pageerror、失败资源、页面尺寸和必要 DOM 观测；等待字体就绪并设置总超时。卡住时输出超时原因，关闭 context/browser 并清理进程。
+
+用户仍在查看结果时保留一个有时限的预览租期；任务切换、显式关闭或 TTL 到期才停止。否则“任务结束即停止预览”会造成刚生成就无法查看。完成导出不依赖预览进程一直存活。
+
+联调条件：固定工程真实构建并显示；编译错、浏览器异常、端口冲突、取消和超时都有稳定返回；连续生成不会累积孤立进程。
+
+### 18.12 检查服务、视觉 diff、Spec 交互怎么对接
+
+对应第 9、14 节。新增 `checks/planner.py`、`checks/service.py`、`checks/visual.py`、`checks/interactions.py`。
+
+CheckPlanner 在生成前基于输入类型和 Brief 返回固定 CheckPlan；模型生成的 requirement_mapping 只是索引，不能作为实际检查结论。
+
+调用契约：`CheckService.evaluate(candidate_ref, build_ref, observations, check_plan) -> list[CheckResult]`。检查函数拿采集到的事实和固定规则，不自行触发供应商模型。
+
+首批可实际落地的检查：
+
+| 检查 ID | 输入事实 | 输出及失败依据 |
+| --- | --- | --- |
+| `build.typescript` | tsc 退出码/日志 | 非零即 FAIL |
+| `build.bundle` | build 退出码/dist manifest | 无产物或失败即 FAIL |
+| `runtime.page` | pageerror/加载状态 | 未处理异常或加载失败 |
+| `assets.available` | 必需资源清单/请求结果 | 缺图、缺字体、资源失败 |
+| `layout.overflow` | scrollWidth/clientWidth | 超出预先设定的容差 |
+| `a11y.basics` | 允许的标签/焦点/表单观测 | 对应基础规则失败；不声称全面无障碍认证 |
+| `visual.reference` | 同视口参考图/候选截图 | 指标和差异图；未校准门限时为待人工确认 |
+| `spec.<criterion_id>` | 固定交互步骤与断言 | 实际交互未满足期望 |
+
+适用性示例：截图有原图，视觉检查适用；Spec-only 无参考图，标 `not_applicable` 并写理由；有参考图但浏览器没启动，视觉检查为 `NOT_RUN`，不得当不适用。
+
+支持的 Spec 交互以模板执行：dialog_open、tab_switch、text_filter、required_field 等。建议选择器优先 role/label，必要时模板约定 data-testid。测试动作来自已经确认的 Brief，模型输出不能临时重新定义期望结果。
+
+交互样例：找到 role=button/name=新建任务 → click → 断言 role=dialog/name=新建任务 可见。对于不可唯一定位或复杂行为输出 UNKNOWN/人工待查；不直接执行模型写出的任意测试脚本。
+
+视觉 diff 步骤：检查尺寸/缩放一致 → 统一截图条件 → 应用预先确认 mask → 计算确定性差异 → 输出参考/实际/diff 三张图与指标。用户查看后可提交明确的人工结论；自动视觉 PASS 需要先有已校准的门限和规则版本。
+
+人工本地查看接口：`POST /runs/{id}/review`，带 candidate_id、candidate_hash、check_plan_hash、verdict、逐项人工检查结果和备注。先核对候选与计划，再只为计划中 `mode=manual` 的条目写入有操作者/时间/依据的人工结论；自动检查失败或执行未知不能被这个接口覆盖。最后重算必要检查，全部有确定结论且通过时才设 COMPLETE_LOCAL。这样视觉人工待查项可以完成复核，而真实构建失败仍然阻断。旧候选通过的人工结论不自动转移到修复后的候选。
+
+人工结果以 `source=human` 保存，不伪装成机器检查；拒绝重复提交不同内容却覆盖原结论，修正结论需形成新记录。纯人工确认不触发新的模型请求。
+
+联调条件：向固定样例注入 TS 错、缺图、溢出、按钮失效各能失败；恢复后可通过对应规则；没有执行的检查绝不因为源码里存在媒体查询就显示 PASS。
+
+### 18.13 一次修复如何串回生成与检查
+
+对应第 10 节。新增 `repair/service.py`、`repair/feedback.py`。
+
+请求：
+
+```text
+POST /api/d2c/v1/runs/run_demo_01/repair
+Idempotency-Key: repair-demo-001
+```
+
+```json
+{
+  "candidate_id": "cand_demo_001",
+  "candidate_hash": "sha256:<当前候选摘要>",
+  "state_version": 7
+}
+```
+
+失败列表从服务端检查记录读取，不接受浏览器提交一套替代的 PASS/FAIL。修复接口用事务核对 candidate/hash/version、有效失败、修复次数、剩余预算、外部调用是否存在 UNKNOWN。满足后预留唯一修复名额并排队，返回 202 与同一个 run_id。
+
+Feedback 包含：failed_check_id、问题分类、期望/实际、文件行列、精简日志、必要截图、当前文件集合、模板允许修改范围。对重复日志去重，对超长错误截断并保留完整日志引用。
+
+修复再次调用同一 GenerationProvider，`purpose=repair`；输出完整受控文件集合，生成 c002 并链接 parent=c001。首版不要求模型返回复杂 patch 格式，减少 diff 应用失败。
+
+c002 必须重新构建、重新采集、运行所有适用检查；原 c001 的 PASS 不能复制给新版本。若二次仍失败，报告最终 FAIL，按钮显示额度已用尽；用户后续修改需求应创建新 Run。
+
+重复幂等请求只返回原操作；如果第一次请求响应丢失，查询 Run 确认，不能通过换幂等键再获得第二次修复名额。预留名额和预算的释放只在能够证明未发供应商请求时进行。
+
+状态上允许“可修复的 FAILED → REPAIRING”，这是显式状态转移，需 state_version 条件；不可恢复错误和 UNKNOWN_EXTERNAL 不允许通过此接口绕过。
+
+联调条件：并发双击只有一条 repair 调用；修复中取消不会提交成功状态；c001/c002 的源码、检查和截图可分别查看；修复后回归问题能被再次发现。
+
+### 18.14 Onlook 的元素定位和源码修改怎样集成
+
+对应第 2.3、11.3 节，按两层实施。
+
+**第一层：选中元素后给模型补充修改上下文。** 主底座已经有 `select-and-edit/`、`PreviewComponent.tsx`、`buildSelectedElementInstruction()` 等，无需为了选中一个元素就整套运行 Onlook。复用其中的元素描述与交互外观，把选中元素与当前 candidate 绑定，作为一次修复的补充反馈。
+
+主底座旧预览会读取 iframe.contentWindow.document；当预览改为不同 origin 后，这种读取方式会受同源限制。需要在候选预览中注入受控 bridge，通过消息将可选元素信息发送给工作台。
+
+新增消息示例：
+
+```json
+{
+  "channel": "design2code.preview.v1",
+  "type": "element.selected",
+  "session_id": "preview_demo_01",
+  "candidate_id": "cand_demo_001",
+  "element": {
+    "source_id": "srcnode_42",
+    "instance_key": "item_03",
+    "tag": "button",
+    "text": "保存",
+    "rect": { "x": 24, "y": 160, "width": 80, "height": 36 }
+  }
+}
+```
+
+父页面校验 event.origin、event.source、预览会话和 schema，限制文本长度；消息只能选中/高亮/描述，不能授权写源码、启动 shell 或更改预算。预览脚本属于生成产物，不能因消息带 session_id 就视其可信。
+
+**第二层：确定性样式/文案编辑与源码保存。** 参考以下 Onlook 实际落点：
+
+- `apps/web/preload/script/index.ts`：iframe 连接。
+- `packages/penpal/src/parent.ts` 与 `child.ts`：父子方法协议。
+- `packages/parser/src/ids.ts`：JSX 源码标识注入。
+- `packages/parser/src/parse.ts`：TSX 解析/输出。
+- `packages/parser/src/code-edit/style.ts`：`addClassToNode`、`replaceNodeClasses`。
+- `packages/parser/src/code-edit/text.ts`：`updateNodeTextContent`。
+
+Onlook preload 依赖自己的 models/constants/utility/Penpal，并且当前连接中允许 `allowedOrigins: ['*']`；不能直接复制 script/index.ts 进入本项目就认为协议与依赖已兼容。本项目桥接要使用显式 origin。
+
+源码定位由构建前 AST 工具注入 `data-d2c-source-id`，生成 mapping.json：source_id → 文件/JSX 节点/源码摘要。映射由工具计算，不要求模型随意生成文件行号；React 列表重复实例通过 instance_key 区分，源码位置可能仍指向同一模板节点。
+
+样式编辑接口草案：`POST /runs/{id}/edits`，提交 expected_candidate_hash、source_id、操作类型（set_text/set_class）和新值。后端解析 current candidate → 调用受限 AST 操作 → 生成新候选 → 全量检查 → 更新预览。不能只修改 DOM 后显示“已保存到源码”。
+
+AST 工具运行在 Node 进程，通过 stdin/stdout JSON 连接 Python；错误分别包含解析失败、source_id 不存在、旧摘要冲突、不支持动态表达式。只支持简单静态节点，遇到复杂表达式返回不支持，不做字符串全局替换。
+
+这一层属于后续范围。第一版先完成截图/Spec/Figma 到工程的链路；手动编辑也必须失效旧检查和人工结论，候选版本限制在启用前明确设置。若在 Onlook 仓库内部直接改代码，使用其 Bun 工作流；迁移到本项目的独立工具使用主工程选定的工具链并显式列出依赖。
+
+联调条件：跨 origin 选中有效、错误 origin 被忽略；重建后位置映射正确；编辑后源码与预览一致；复杂 TSX 不被误改。
+
+### 18.15 前端组件、Store、API 客户端如何组织
+
+对应第 11 节。
+
+新增模块建议：
+
+```text
+frontend/src/features/design2code/
+  api/client.ts                 # HTTP 请求、统一错误处理
+  api/runEvents.ts              # WS、seq、补齐、关闭
+  contracts.ts                  # 与后端 Schema 对齐的类型
+  store.ts                      # 输入草稿、当前 run、候选和 UI 状态
+  inputs/useScreenshotInput.ts  # 文件/拖拽/粘贴统一处理
+  inputs/FigmaInput.tsx
+  inputs/SpecInput.tsx
+  inputs/SourceList.tsx         # 多来源列表、用途、视口和状态
+  inputs/InstructionEditor.tsx  # 本次任务指令
+  inputs/ConflictPanel.tsx      # 冲突与采用的处理结论
+  BriefSummary.tsx
+  RunProgress.tsx
+  ResultPane.tsx
+  CheckReport.tsx
+```
+
+主底座 `project-store.ts` 已经保存 commits/variants/referenceImages，不能再建两份完整候选源码状态。新版 Store 只持久化服务器 ID 和显示状态；代码内容按 candidate_id 获取并缓存。旧 commits 仅作上游兼容外观，不作为 Run 真值。
+
+客户端最小方法：
+
+```ts
+uploadInput(form: FormData): Promise<InputSummary>
+readInput(inputId: string): Promise<InputSummary>
+importFigma(request: FigmaImportRequest): Promise<InputSummary>
+createSourceSet(value: SourceSetDraft): Promise<SourceSetSnapshot>
+readSourceSet(sourceSetId: string): Promise<SourceSetSnapshot>
+updateSourceSet(sourceSetId: string, value: SourceSetDraft, hash: string): Promise<SourceSetSnapshot>
+saveBrief(sourceSetId: string, value: BriefDraft, hash: string): Promise<BriefSummary>
+createRun(value: CreateRunRequest, idempotencyKey: string): Promise<RunSnapshot>
+readRun(runId: string): Promise<RunSnapshot>
+readFiles(runId: string, candidateId: string): Promise<CandidateFiles>
+requestRepair(runId: string, value: RepairRequest, key: string): Promise<RunSnapshot>
+cancelRun(runId: string): Promise<RunSnapshot>
+```
+
+为源码查看新增 `GET /runs/{id}/candidates/{candidate_id}/files`；返回有体积上限的允许源码，二进制资源仅返回 asset 引用。readFiles 必须校验 candidate 属于 run。
+
+工作台事件顺序：添加一种或多种资料 → 各自校验/保存 → 保存 SourceSet 与本次指令 → 展示用途与冲突 → 确认 Brief → createRun 一次 → 订阅该 run → build 完成后加载 preview URL → 检查显示 → 用户查看/一次修复 → 导出。上传入口可分标签，已加入的资料必须共同保留在 SourceList，切换标签不能清空其他来源。
+
+显示规则：生成中可展示文本增量；尚未构建成功的代码不直接执行；checks 未返回前显示“检查中”；修复按钮根据 allowed_actions；失败可下载调试包，但包与界面均显示失败状态。
+
+旧 PreviewComponent 主要接收 HTML `srcdoc`，需新增工程模式 `src=preview_url`；CodeMirror 可复用但增加文件列表。不要把整个 GenerationResult JSON 作为 HTML 渲染。
+
+健康/能力接口新增 `GET /api/d2c/v1/capabilities`，返回 provider_configured、figma_configured、runner_ready、template_ready、supported_inputs、unsupported_reasons。只暴露可用性，不返回 `.env` 内容；UI 据此禁用暂不可用入口。
+
+联调条件：用户看得清正在用哪种输入；刷新可找回 Run；没有调用两条生成链；缺配置时能看到具体缺少的能力，而不是反复点击后空转。
+
+### 18.16 单一 `.env`、启动与代理怎么对接
+
+对应第 12.1 节。本节是全部运行配置的唯一字段说明，其他章节不再维护独立模板。
+
+#### 18.16.1 唯一填写位置与当前状态
+
+```text
+D:\desktop\AI\D2C\Design2Code\.env
+```
+
+文件名就是 `.env`，没有其他后缀，也不能保存成 `.env.txt`。模型与 Figma 的 key 可按用户选择明文写在这个本机文件中。三个上游目录中的示例文件只作参考，不需要分别填写。
+
+**当前状态：根 `.env` 已创建；中转地址、key 和模型已配置，用户选择暂不设置 token 和费用上限。后端已增加根配置读取，真实模型生成链尚在开发。**
+
+#### 18.16.2 集中配置模板
+
+根 `.env` 已按下面这一份模板创建。空值表示尚未配置；数字是拟定工程默认，只有完成 Settings、启动和调用链对接后才生效。
+
+```dotenv
+# ===== 1. 模型与中转：按 OpenAI 兼容中转填写 =====
+D2C_PROVIDER=openai
+# openai_responses 或 openai_chat_completions，必须与中转实际协议一致
+D2C_API_PROTOCOL=openai_responses
+# 填中转平台给出的 API 基础地址，例如 https://relay.example.com/v1
+OPENAI_BASE_URL=
+OPENAI_API_KEY=
+# 填中转平台实际提供、支持图片输入的准确模型 ID
+D2C_MODEL=openai/gpt-6-luna
+D2C_PROVIDER_TIMEOUT_SECONDS=180
+
+# ===== 2. 其他供应商：不使用则留空，不会自动切换 =====
+ANTHROPIC_API_KEY=
+GEMINI_API_KEY=
+
+# ===== 3. Figma：不用 Figma 时留空 =====
+FIGMA_ACCESS_TOKEN=
+D2C_FIGMA_TIMEOUT_SECONDS=60
+
+# ===== 4. 工作台、后端、预览 =====
+D2C_WEB_HOST=127.0.0.1
+D2C_WEB_PORT=5173
+D2C_BACKEND_HOST=127.0.0.1
+D2C_BACKEND_PORT=7001
+D2C_PREVIEW_HOST=127.0.0.1
+D2C_PREVIEW_PORT_START=7100
+D2C_PREVIEW_PORT_END=7199
+
+# ===== 5. 本地数据与固定工程模板 =====
+# 相对路径统一相对于 Design2Code 根目录
+D2C_RUNTIME_DIR=./runtime
+D2C_TEMPLATE=react-vite-v1
+
+# ===== 6. 输入限制与默认检查视口 =====
+D2C_MAX_SCREENSHOTS=3
+D2C_MAX_IMAGE_BYTES=10485760
+D2C_MAX_IMAGE_PIXELS=40000000
+# JSON 字符串；单引号由 dotenv 解析器移除
+D2C_VIEWPORTS='[{"width":1440,"height":900},{"width":768,"height":1024},{"width":390,"height":844}]'
+
+# ===== 7. 整个 Run 的调用和预算上限 =====
+D2C_MODEL_REQUEST_LIMIT=2
+D2C_REPAIR_LIMIT=1
+D2C_AUTO_RETRY_LIMIT=0
+# 以下为可选上限；留空表示当前不设置相应上限
+D2C_TOKEN_LIMIT=
+D2C_COST_LIMIT_MICRO_USD=
+
+# ===== 8. 本地执行超时 =====
+D2C_BUILD_TIMEOUT_SECONDS=120
+D2C_PREVIEW_TIMEOUT_SECONDS=60
+D2C_CHECK_TIMEOUT_SECONDS=120
+```
+
+用户已指定统一模型 `openai/gpt-6-luna`，根 `.env` 已保存该值；初次生成与修复共用此配置，不为图片、Spec、Figma 另选模型，不启用其他模型 fallback。模型 ID 按中转要求原样发送，保留 `openai/` 前缀；该前缀本身不决定使用 Responses 还是 Chat Completions，协议仍由 D2C_API_PROTOCOL 指定。模型可用性与图片支持尚未实测。
+
+只用一种中转时，在第 1 组填写基础地址、key 并核对接口协议。第 7 组的 token/费用上限按用户要求暂时留空；请求次数与修复次数限制仍生效。模型实际支持的图像/上下文上限还需由适配器校验，不由上述上传限制替代。
+
+#### 18.16.3 中转字段怎么填
+
+| 字段 | 填写内容 | 读取与约束 |
+| --- | --- | --- |
+| `D2C_PROVIDER` | OpenAI 兼容中转填 `openai` | 表示适配器类型，不代表请求一定发送到 OpenAI 官方 |
+| `D2C_API_PROTOCOL` | `openai_responses` 或 `openai_chat_completions` | 明确协议，不以失败后自动换协议的方式重复发请求 |
+| `OPENAI_BASE_URL` | 中转提供的 API 基础地址 | 是否包含 `/v1` 以平台说明为准；不填登录页面或完整生成 endpoint |
+| `OPENAI_API_KEY` | 该中转平台的 key | 由后端发送给所配置中转，不要求另外填写官方 key |
+| `D2C_MODEL` | 中转公布的准确模型 ID | 不能只凭系列名称推测；需支持本次图片与代码生成输入 |
+| `D2C_PROVIDER_TIMEOUT_SECONDS` | 单次模型请求超时秒数 | 超时不自动重试；请求是否受理不明确时保留未知记录 |
+
+base URL 是“接口前缀”；协议适配器负责拼接 `responses` 或 `chat/completions`。不要手工把完整 endpoint 写进 base URL 再重复拼接，也不要统一给所有平台强行添加 `/v1`。
+
+上游 `OpenAIProviderSession` 目前走 Responses。`openai_chat_completions` 是本项目拟新增的配置选项，需补对应多模态消息序列化、流式结果、usage 与错误映射；仅在文件里填这个值不会让现有代码自动兼容。未实现的协议应显示 `PROTOCOL_NOT_IMPLEMENTED` 并禁止发请求。
+
+中转模型 ID 不能被上游固定的 Llm 枚举无条件拦截。新版适配器应读取经校验的 D2C_MODEL 字符串及能力配置；不为名称未知的中转模型套用另一个模型的价格或上下文额度。价格缺失时显示预算校验缺口，不用零价格假装已核实费用。
+
+Anthropic/Gemini 路径仍是可选扩展，不额外创建另一份 `.env`；如果将来选用它们，应先补齐对应协议与地址契约。单填其 key 不代表当前首版已验证该路径。
+
+#### 18.16.4 其余配置如何统一消费
+
+| 配置组 | 使用方 | 行为约定 |
+| --- | --- | --- |
+| Figma token/超时 | 后端 FigmaClient | token 空时仅禁用 Figma 远程导入，图片和 Spec 仍可使用 |
+| WEB/BACKEND host/port | 根启动脚本、Vite、FastAPI | 从同一配置读取；端口占用报错，不悄悄换端口后留下旧代理 |
+| PREVIEW host/port 范围 | 受管 Runner | 从范围内分配空闲端口；不能与工作台/后端端口重叠 |
+| RUNTIME_DIR | Store、SQLite、Runner、ExportService | 用根目录解析相对路径；SQLite 路径派生为 runtime 下文件，不再要求重复填写 |
+| TEMPLATE | 固定工程模板选择器 | 校验模板存在；不是模型可以随意指定的安装命令 |
+| 图片数量/字节/像素上限 | 上传 API 与前端公开能力 | 前端提示与后端校验使用同一数值；后端仍做真实解码 |
+| VIEWPORTS | 预览、截图、CheckService、报告 | 同一份 JSON 默认值；若任务明确要求其他尺寸，在固定检查计划中记录覆盖值 |
+| 请求/修复/重试/token/费用上限 | RunPolicy、ProviderAdapter | 对整个 Run 生效；修复共享额度；客户端只能申请更低上限 |
+| 各类超时 | 对应客户端或执行器 | 使用正整数秒；模型、Figma、构建、预览和检查分别计时 |
+
+`D2C_TOKEN_LIMIT` 的口径为整个 Run 的输入与输出 token 预留总额；图像用量按供应商口径计入估算和实际记录。`D2C_COST_LIMIT_MICRO_USD` 为内部美元微单位预算，1 美元对应 1000000 微美元；它不直接代表中转最终账单。用户明确要求暂不设置上限，两者为空时不阻止真实生成；仍展示实际用量及费用是否已知。
+
+首版固定最多 3 张截图、2 次模型请求、1 次修复、0 次自动重试；配置可收紧，上调超出已实现边界时应拒绝启动相关能力，不能仅改数字就宣称支持更多行为。图片限制默认每张 10 MiB、4000 万像素，超限时明确提示缩小图片，不静默丢图。
+
+所有 D2C_* 新字段由本项目 Settings 读取，上游 config.py 不会自动识别。Settings 统一完成字段类型、允许值、跨字段关系、缺失项与路径解析，并生成不含秘密的公开能力子集。
+
+#### 18.16.5 加载与启动约定
+
+1. 新增一个集中 Settings 模块，负责确定唯一根 `.env` 路径并校验配置；业务模块不自行查找其他 `.env`。
+2. FastAPI `main.py` 在导入 config/routes 前显式加载根文件。按当前目录结构，可由 `Path(__file__).resolve().parents[2] / '.env'` 定位；不再依赖启动工作目录与无参 `load_dotenv()` 自动搜索。
+3. 根 `.env` 中声明的项目配置值优先于同名父进程变量，避免终端遗留 key/地址覆盖用户填写内容；仅对已声明的项目字段应用这一约定，不覆盖 PATH 等系统环境。
+4. Vite 从同一路径读取白名单中的启动参数、公开端口和代理目标；不把完整 env 展开到 define/import.meta.env。关闭 Vite 按模式自动叠加其他 env 文件的路径，不另设 frontend/.env。
+5. 浏览器只使用同源 `/api/d2c/v1`；已有 `/api` 代理增加 WS 支持。前端 Settings/localStorage 中旧 key 不再作为新版调用来源，界面显示“服务端已配置/未配置”。
+6. 后端调用供应商时读取 key；Runner 启动生成工程时只传构建所需的环境白名单，不继承整份配置。根 `.env` 加入 Git 忽略和 ZIP 排除。
+7. 修改 `.env` 后重启受影响服务再生效；有活动 Run 时先完成或取消该 Run，不在生成途中热换模型、地址或预算。
+
+最终新增根目录 `Start-Design2Code.ps1`/`Stop-Design2Code.ps1`。目标使用方式为：
+
+```powershell
+cd D:\desktop\AI\D2C\Design2Code
+.\Start-Design2Code.ps1
+# 停止时执行
+.\Stop-Design2Code.ps1
+```
+
+**上述脚本尚未创建，目前不能当作已有启动命令执行。** 实施时由启动脚本读取集中配置 → 检查工具和固定依赖 → 用指定 host/port 启动两个服务 → 等待健康 → 记录进程引用。后台进程使用隐藏窗口；启动诊断不输出配置全文、key 或 token。真实模型执行使用单 worker，不使用 `--reload`。
+
+#### 18.16.6 配置联调完成条件
+
+- 只有根 `.env` 一份实际配置；从任意工作目录启动均读取相同值，不依赖其他同名文件。
+- 修改根端口后，服务监听地址、Vite HTTP/WS 代理和浏览器入口同步生效；预览保持独立 origin。
+- 修改 key、URL 或模型并重启后，供应商适配器消费新值；通过 mock transport 先验证路径与模型参数，不打印 key。
+- 分别核验 Responses/Chat Completions 的实际适配状态；未实现的选项不能显示已支持，不因协议失败自动发起第二次请求。
+- 空 key、模型或 URL 时仍可打开界面，真实生成明确显示缺失字段；预算可留空；Figma token 空时只影响 Figma 导入。
+- 预览、导出 ZIP、日志和浏览器存储不包含配置秘密；报告保留实际模型、协议和脱敏来源说明。
+
+本节测试完成后才能把“统一配置已实现”写入进度记录；当前仅完成配置设计与文档整理。
+
+### 18.17 工程 ZIP、报告、资源怎样集成导出
+
+对应第 12.2 节。新增 `reports/export_service.py`、`reports/render.py`，修改前端 download.ts 的新版调用入口。
+
+原 `downloadCode(code)` 把浏览器中的 HTML 发送到 `POST /api/export`，失败时回退下载 HTML。新版应提交固定 run/candidate 标识，服务端读取已经保存的文件；不能继续接受浏览器任意改过的 code 作为“已验收工程”。
+
+接口：
+
+```text
+GET /api/d2c/v1/runs/{run_id}/report?candidate_id={candidate_id}&format=json
+GET /api/d2c/v1/runs/{run_id}/report?candidate_id={candidate_id}&format=html
+GET /api/d2c/v1/runs/{run_id}/export?candidate_id={candidate_id}&include_sources=false
+```
+
+导出步骤：核对 candidate 归属与摘要 → 固定本次 report/check snapshot → 读取允许文件 → 组装源码/lockfile/资源/README/报告/截图/hash 索引 → 再核对候选和快照 → 返回 application/zip。
+
+文件布局建议：
+
+```text
+design2code-export/
+  project/               # 完整可构建前端工程
+  evidence/              # 实际截图、diff、必要日志
+  report.json
+  report.html
+  manifest.json          # 候选、模板、输入摘要、规则版本
+  hashes.json
+  README.md
+```
+
+失败候选的报告和 README 必须写 `delivery_status=FAILED_DEBUG`；通过必要检查并完成本地查看的包写 `COMPLETE_LOCAL`。用户主动指定历史 candidate 可导出其历史报告，但不能附上当前新候选的检查结果。
+
+资源在输入/构建阶段已本地化，导出时优先只读本地快照。上游导出会扫描 URL 并在导出时请求外网下载图片，这个行为不直接继承为新版默认，以免 ZIP 内容受临时远程变化影响。
+
+HTML 报告对 Spec、模型文本、错误日志做转义，不把用户输入直接作为 HTML 注入。ZIP 使用允许路径和数量/体积限制；显式排除 .env、metadata.sqlite、秘密配置、临时凭据、node_modules 和无关上游源码。
+
+联调条件：下载 ZIP 后在干净目录按 README 安装锁定依赖并构建；hashes 可复算；导出失败不会静默退回一个 HTML 文件却仍显示“工程导出成功”。
+
+### 18.18 旧项目的能力怎样小范围迁移
+
+对应第 3 节。迁移单位是“规则/采集器/测试案例”，不是完整旧服务。
+
+步骤：
+
+1. 选一个独立问题，例如水平溢出或键盘焦点。
+2. 阅读旧实现依赖，区分纯计算、浏览器采集和数据库写入。
+3. 将纯规则改成 `evaluate(observation, expectation) -> CheckResult`，数据模型使用新版 contracts。
+4. 原 PostgreSQL Evidence writer 不迁移，由新版 SQLite 统一保存结果。
+5. 把相关 fixture/故障案例迁移为新版测试；记录来源文件、旧版本与改动说明。
+6. 用真实浏览器观测验证，保留输入/候选/规则摘要。
+
+具体例子：旧 `application/acceptance/` 中的基础布局与键盘检查可研究；商品 identity、价格与 Medusa 数据契约留在旧项目。旧 `product_delivery_export.py` 的路径/摘要检查思路可借鉴，但其审批表查询和发布条件不进入新版导出。
+
+如果独立提取仍需要大量旧领域对象，优先在新版用小而明确的规则重新实现，不通过 runtime import 把整个 platform 拉入新服务。
+
+联调条件：停止旧 PostgreSQL/S3/Keycloak 后，新版仍可生成和检查通用页面；导出包和检查报告中不会出现旧商品任务审批 ID。
+
+### 18.19 各部分的完成证据与实施依赖
+
+对应第 13～17 节。每项合并时记录源码 commit、验证入口、结果和剩余缺口，避免只完成接口壳就写成已集成。
+
+| 工作包 | 上游/新增代码落点 | 依赖 | 必须展示的完成证据 |
+| --- | --- | --- | --- |
+| A 主底座运行 | main.py、vite.config.ts、启动脚本 | 固定环境 | 真实 React 页面、后端健康、HTTP/WS 代理 |
+| B 输入与资源 | UploadTab/TextTab、inputs、asset API | A | 粘贴真实截图；Spec 保存；资源摘要 |
+| C 统一任务 | contracts、RunService、SQLite/events | A/B | 幂等创建、状态查询、断线补齐 |
+| D 真实生成 | ProviderSession 适配、single_shot | B/C | 实际供应商调用与结构化文件输出 |
+| E 工程与 runner | 固定模板、candidate writer、runner | C/D | 类型检查、bundle、真实预览 URL |
+| F 检查与修复 | CheckService、RepairService | D/E | 坏候选拒绝、一次修复、全量复验 |
+| G Figma | FigmaClient、Normalizer | B/C | 真实节点 JSON/图/资源进入同一链 |
+| H 插件资料包 | ZIP importer | B/E | 真实 FigmaToCode 导出包安全解析 |
+| I 导出交付 | ExportService、报告页 | E/F | 干净目录复现、哈希一致 |
+| J 可视化编辑 | preview bridge、AST worker | E/F/I | 点选定位、源码修改、新候选复验 |
+
+首版推进顺序：A → B/C → D/E → F → G → I。H 是 Figma 导入补充，J 是首版完成后的扩展。B/C 和 D/E 内部按字段和调用依赖先后实现，不要求另外引入多人或多个 Agent。
+
+修改 screenshot-to-code 的 Python 代码时按仓库 AGENTS 使用 Poetry 环境，执行后端 pytest 与 pyright；前端修改执行 pnpm lint/build 与相关交互验证，记录已有基线问题。FigmaToCode 的 Node/pnpm 版本与主底座不同，应隔离其工具链。仅研究 Onlook 不需要安装/运行其完整依赖。
+
+文档、仓库拉取、静态接口样例、mock transport、真实构建、真实供应商、人工查看分别记录验证层级。测试通过数量不能替代输入到交付的实际案例。
+
+### 18.20 图片 + Spec + Figma + 指令如何共同生成
+
+#### 18.20.1 用户实际怎么操作
+
+同一任务保留一份资料列表，用户可按任意顺序添加：
+
+1. Ctrl+V 粘贴或上传图片，标记为“桌面视觉目标”“移动端布局目标”或“某区块的样式参考”。
+2. 粘贴 Figma 节点链接，选定本页 Frame，读取布局、设计变量、组件信息和资源快照。
+3. 输入或上传 Spec，描述页面内容、交互、状态、响应式与验收要求。
+4. 填写本次指令，说明哪些地方采用哪份资料、需要增删什么。
+5. 查看组合摘要与冲突结论后，点击一次生成，得到同一个 React 工程。
+
+例子：“做一个任务管理页面。整体布局和间距按 Figma；配色和圆角参考图片 A；搜索、状态筛选、新建弹窗按 Spec。桌面宽度 1440，移动端 390；移动端按 Spec 改成单列；使用 React + TypeScript，数据先用本地 mock。”
+
+三份资料不要求完全相同，但必须属于同一页面的目标。只给其中一种也能生成；Figma 未配置时仍可用图片 + Spec + 指令。用户已加入且标记必需的 Figma 读取失败时不能静默忽略，需移除该来源并重新确认，或等待读取成功。
+
+#### 18.20.2 按维度决定采用什么，避免整份资料互相覆盖
+
+| 维度 | 未另行指定时的建议 | 用户可明确覆盖的例子 |
+| --- | --- | --- |
+| 页面结构、尺寸、间距 | 选定的 Figma Frame；缺少 Figma 时采用对应截图 | “侧栏删掉，主体保持 Figma 布局” |
+| 配色、字体、圆角、阴影 | Figma 已声明样式；图片作为补充 | “颜色参考图片 A，间距保持 Figma” |
+| 标题、文案、字段、演示数据 | Spec 中明确声明的内容，再补设计文本 | “标题改为项目工作台，保留其余文案” |
+| 交互、校验、加载/空/错误状态 | Spec 中明确声明的行为 | “第一版只做搜索和新建，不接登录” |
+| 响应式 | 明确的响应式规则；对应宽度的设计图作参考 | “390 下单列，不显示桌面侧栏” |
+| 资源 | 来源中可用且被选定的图片/图标 | “封面使用我上传的这张图片” |
+
+本次明确指令可覆盖上述维度的默认来源；指令自身冲突时仍需解决。记录采用来源的 input_id、JSON 字段/节点/Spec 条目和适用区域。默认来源不足以解决所有语义冲突，不能声称仅靠规则就能自动理解任意资料。
+
+举例：Figma 为蓝色按钮、图片为绿色按钮，指令已写“配色按图片”，则记录绿色为有意变更；Spec 同一位置要求两个互斥的点击结果且用户未指定取舍，则列为阻断冲突。缺少阴影细节可采用模板默认值，进入 assumptions。
+
+输入摘要展示“将采用什么”，让用户能一次修改。首版依靠确定性提取、已知字段规则与用户确认；图片中不能机械提取的精确信息由首次生成模型共同理解，不另开隐藏的分析请求。首次生成才发现未解决的关键矛盾时，Run 结束为 FAILED，原因码为 `NEEDS_INPUT`，展示需补充的问题，不发布虚构完整结果；该请求照实计数，用户调整输入后建立新 Run，不自动增加调用额度。
+
+#### 18.20.3 SourceSet 接口与固定版本
+
+独立的图片/Spec/Figma 输入接口保持不变，每个来源各有 input_id 和摘要。新增组合请求：
+
+```text
+POST /api/d2c/v1/source-sets
+Content-Type: application/json
+```
+
+```json
+{
+  "sources": [
+    {
+      "input_id": "inp_figma_01",
+      "role": "structure_reference",
+      "scope": { "page": "task-board", "region": "page", "state": "default" },
+      "required": true
+    },
+    {
+      "input_id": "inp_image_01",
+      "role": "style_reference",
+      "scope": {
+        "page": "task-board", "region": "page", "state": "default",
+        "viewport": { "width": 1440, "height": 900 }
+      },
+      "required": true
+    },
+    {
+      "input_id": "inp_spec_01",
+      "role": "behavior_and_content",
+      "scope": { "page": "task-board", "region": "page" },
+      "required": true
+    }
+  ],
+  "instructions": "布局和间距按 Figma，颜色与圆角按图片，交互与内容按 Spec；390px 下单列，使用本地 mock。",
+  "authority_by_dimension": {
+    "layout": "inp_figma_01",
+    "style": "inp_image_01",
+    "content": "inp_spec_01",
+    "behavior": "inp_spec_01",
+    "responsive": "instructions"
+  },
+  "resolutions": []
+}
+```
+
+source 的 type、hash 和尺寸由服务端按 input_id 读取，客户端不能冒充另一种来源。role 表达用途；更细的区块覆盖规则进入 resolutions，记录 dimension、scope、chosen_source、reason 和用户结论。资料顺序只控制展示，不能通过拖动列表暗中改变优先级。
+
+响应示例：
+
+```json
+{
+  "source_set_id": "srcset_demo_01",
+  "source_set_revision": 1,
+  "source_set_hash": "sha256:<规范化资料集合摘要>",
+  "status": "DRAFT",
+  "brief_id": "brief_demo_01",
+  "brief_revision": 1,
+  "brief_hash": "sha256:<合并后的生成说明摘要>",
+  "conflicts": [],
+  "assumptions": ["未提供真实 API，采用本地演示数据"],
+  "ready_for_confirmation": true
+}
+```
+
+保存 Brief 时用其当前 brief_hash 作 If-Match，并提交 source_set_revision/hash。服务端确认所有纳入来源 READY、无阻断冲突后，返回已确认的 Brief 与资料集合可运行状态。来源仍在 IMPORTING 时可保存草稿，但不能创建 Run。`required=false` 的来源读取失败时也不能悄悄消失：显式排除、生成新 revision 并展示给用户确认。
+
+更改资料、指令或采用规则时，`PUT /source-sets/{id}` 使用当前 source_set_hash 作 If-Match，新增 revision 并生成新的 Brief 草稿。原有确认不沿用；旧 Run 仍使用旧快照。摘要覆盖输入的内容摘要、角色/范围、指令、来源规则与冲突结论；采用规范化 JSON 规则，不依赖本机绝对路径、临时下载 URL 或更新时间。
+
+18.9 的 Run 请求使用 source_set_id/revision/hash，不再用单个 input_id 表达整项任务。需要兼容历史单输入调用时，可在服务端适配成单元素 SourceSet，但不得绕过 Brief 确认和相同校验。
+
+#### 18.20.4 后端如何组装并调用一次生成
+
+建议新增 `contracts/source_sets.py`、`inputs/source_set_service.py`、`inputs/merge.py`；在 prompt 组装模块新增 `context_builder.py`。调用链：
+
+```text
+ScreenshotAdapter / SpecAdapter / FigmaAdapter
+  → 不可变 InputSnapshot + 资源
+  → SourceSetService（组合、版本、用途、冲突）
+  → BriefComposer（来源映射、假设、验收需求）
+  → 用户确认 Brief
+  → RunService 固定资料集合与检查计划
+  → ContextBuilder（选定子树、图片标号、Spec 条目、任务指令）
+  → 已有统一 ProviderAdapter
+  → 同一 Candidate / Runner / CheckService / ExportService
+```
+
+ContextBuilder 的顺序：生成输出协议 → 已确认任务目标与采用规则 → 相关 Figma 结构/token/资源映射 → Spec 内容与交互条目 → 带用途标号的图片 → 已确认假设与限制。资料正文作为输入数据，不能用其中夹带的文字更改执行预算、工具权限或文件写入边界。
+
+不直接把整份 Figma 文件、任意长 Spec 和原尺寸图片全部拼入请求。选取指定 Frame 子树，过滤无关节点，图片生成受限副本并保留原图；对上下文总大小、模型支持的图像数量和分辨率做预检。超限时指出超出的是哪份资料，让用户缩小范围；不能截掉关键验收条目后继续声称输入完整。
+
+供应商需支持所需的多模态输入。只有文字能力时必须显示图片能力不可用，不能仅发送文件名或图片 URL 字符串就声称理解了截图。文件来源、图片编号和 prompt 中的标号要一一对应。
+
+预算按整个 Run 计算：三种资料一起使用依然最多初次生成 1 次 + 修复 1 次、自动重试 0 次；不变成每种输入各生成一遍。Figma 网络读取不是模型请求，但单独记录读取失败与限流。合并上下文会增加 token/图片用量，仍受同一 token 与费用上限约束；不新增 OCR/预分析模型调用。
+
+#### 18.20.5 组合目标如何验收
+
+检查计划按“区域 + 视口 + 状态 + 维度”绑定来源，避免拿两张不一致的整页参考图同时要求像素一致：
+
+- 布局采用 Figma 时，检查结构、间距等对应来源；图片仅参考配色时，不将整张图片作为布局像素基准。
+- 原始 Figma 渲染或截图仅在其仍是该范围的完整目标时做整图 diff。融合后没有完整目标图时，可展示差异供人工查看，但视觉结论不能自动标 PASS。
+- 桌面参考用于桌面，移动参考用于移动；没有移动图时按声明的响应式约束检查，不把桌面图缩小就当移动端标准。
+- Spec 中搜索、筛选、弹窗分别产生可追踪的交互检查；静态截图不能证明这些交互已经实现。
+- 用户指令修改的颜色/文案等记录为有意变更，并按修改后的目标检查；该记录不能豁免其他尚未检查的部分。
+- 每条检查保留来源引用、目标、候选 ID、结果和证据；无法可靠自动验证的视觉要求保留人工待检查状态。
+
+导出包含 source_set/Brief 摘要、指令、来源角色映射、冲突结论和检查来源映射，设计原稿仍按 12.2 的显式导出选项处理。
+
+#### 18.20.6 首版完成条件
+
+工作包 B/C 增加 SourceSet 合并、版本与指令输入；G 完成后，Figma 输入直接加入同一列表。至少验证：图片 + Spec；Figma + Spec；三类一起；只有一种资料；修改指令导致原确认失效；来源未就绪阻止生成；互斥要求提示解决；超出上下文上限可解释拒绝；生成与修复共享预算；混合视觉目标不会误报整图 PASS。
+
+**当前进度：本节为待实施方案。仅把文档、仓库或接口样例准备好，不代表现有应用已经可以组合输入。**
+
+## 19. 四条端到端联调脚本思路
+
+下面是开发完成后应执行的操作序列。它们是联调清单，当前新增接口尚未实现，不能直接在旧 server.py 上请求。
+
+### 19.1 截图粘贴生成
+
+1. 打开新版 `localhost:5173`，查询 capabilities 确认截图/模型/runner 可用。
+2. 截图后 Ctrl+V：显示缩略图、真实尺寸和可替换入口。
+3. multipart 保存原图，返回 input_id；前端建立只有该输入的 SourceSet，取得 Brief 草稿。
+4. 用户补充交互后保存并确认 Brief，得到新 revision/hash。
+5. 用唯一幂等键创建 Run，只提交一次；WS 从 seq=0 开始订阅。
+6. 检查 provider_calls 首次请求只有一条，收到 GenerationResult 后写 c001。
+7. 固定模板构建，成功后加载独立 origin 预览，显示原图与实际截图。
+8. 全部适用检查运行；有失败且预算允许时一次修复形成 c002，再全量复验。
+9. 用户查看并提交当前候选结论，导出该候选 ZIP。
+10. 在新目录复现；结果不达标则保留失败原因，不把示例完成当作平台全面完成。
+
+### 19.2 Spec 生成功能页
+
+1. 输入“任务列表、搜索、状态筛选、新建弹窗”的 Markdown。
+2. SpecAdapter 保存原文，创建单来源 SourceSet，用户确认首批可自动检查的交互条目及 Brief。
+3. 创建 Run；生成工程后运行固定交互模板。
+4. 视觉参考检查明确不适用；页面溢出、键盘、构建与资源检查继续执行。
+5. 点开新建按钮、输入搜索词、切换筛选，以截图/断言记录实际行为。
+6. 导出报告同时展示自动已测和待人工条目；不展示凭空计算的视觉还原率。
+
+### 19.3 Figma 指定节点生成
+
+1. 提交可访问的节点 URL；后端读取，界面显示 IMPORTING。
+2. 取得同版本节点快照、参考 PNG 和资源，状态变 READY。
+3. 创建单来源 SourceSet；Brief 展示原始尺寸、字体替代、缺少资源、推断的交互并确认。
+4. 复用同一个 Run/Provider/Runner/CheckService，不能出现第二套 Figma 专属任务状态机。
+5. 原始视口用于视觉对比，其他视口用于响应式检查。
+6. 导出保留来源节点和设计快照摘要，默认不附原始秘密配置和不必要的原稿。
+
+### 19.4 图片 + Spec + Figma 共同生成
+
+1. 选择一个真实可访问的 Figma Frame；粘贴一张同页面的配色参考图；保存搜索/筛选/新建弹窗 Spec。
+2. 指令填写“布局按 Figma，配色按图片，交互按 Spec，390px 下单列”。三个输入分别 READY 后创建 SourceSet。
+3. 摘要展示五个维度采用的来源；故意加入互斥的按钮行为，验证阻止生成；解决冲突、保存并确认 Brief。
+4. 绑定 SourceSet 版本创建 Run；核验只出现一条首次生成供应商请求，三个来源共同进入该请求。
+5. 构建真实工程，验证桌面布局、颜色、移动单列、搜索、筛选、弹窗；视觉融合部分显示人工待检查，不能要求两张原始参考整图同时一致。
+6. 一次修复后总模型请求不超过 2；导出可追踪每个关键要求采用的来源。
+7. 修改指令后验证新资料集合 revision 产生、Brief 需重新确认；旧 Run 的资料与候选不改变。
+
+## 20. 开发交接与下一批具体改动
+
+第一批只完成 A/B/C 的基础接口和真实前端：
+
+1. 在 screenshot-to-code 主仓库记录环境与开发分支，核对现有依赖和锁文件。
+2. 将根 `.env` 显式加载接到 main.py 与 Vite 启动配置。
+3. 新增 contracts、`/api/d2c/v1/capabilities` 和输入/资源接口。
+4. 在 UploadTab 加入 Ctrl+V，并让选择/拖拽/粘贴复用同一条文件处理路径。
+5. 接入 TextTab 保存 Spec；新增 SourceList/InstructionEditor 与 SourceSet API，让图片和 Spec 可以同时保留并形成 Brief；Figma 适配就绪后接入同一资料集合。
+6. 实现绑定资料集合版本的最小 SQLite Run 与事件查询，使用固定 GenerationResult 验证界面和候选处理。
+7. 浏览器验证输入、缩略图、状态、错误和重连后，再接真实 Provider 与构建 runner。
+
+每次交接必须回答：改了哪些主仓库文件；用了哪些上游能力；新增了什么契约；实际运行了哪些接口；结果落在哪里；哪些仍为样例/未执行。用户下一步可直接按本节开始实施，无需重新讨论是否限定电商。
+
+## 2026-11-09 实施状态补充（历史快照）
+
+- 当前根目录 `.env` 的 token / 费用预算上限按个人项目需求留空；系统每个 Run 最多两次模型请求、一次修复，不自动重试。若填写预算字段，现阶段会阻止生成，预算执行功能尚未接通。
+- 图片加 Spec 已完成一次真实模型生成、构建、预览、导出和一次真实修复。修复候选页面标题与搜索已在浏览器复核；视觉与交互自动检查目前仍显示 NOT_RUN。
+- 已加入运行停止和服务重启后的中断状态恢复。停止等待无法保证已经发出的供应商请求被取消，构建进程可能短暂继续；不会自动重新请求。
+- 固定模板已加入 Tailwind CSS，模拟候选构建通过。该历史快照中的 Figma 节点导入已有模拟测试；当前 MCP 路径不要求 REST 令牌，真实节点仍待 Figma Desktop 插件连接和节点链接验证。
+- 后端测试 285 项通过；pyright 0 错误、36 条上游原有警告；上游完整前端 lint 仍有 19 个原有错误和 6 条警告。
+- 后续仍需完成（截至该快照）：资料确认和来源冲突提示、自动检查、真实 Figma 验证、修复后导出复验及其余端到端验收。当前状态以文末 2026-11-10 记录为准。
+
+### 视口检查进展
+
+新任务在构建成功后会尝试用本机 Chromium 对桌面和手机视口截图并检测水平溢出；检查不能代表视觉还原或业务功能通过。修复后的真实候选已使用该检查，两个视口均无水平溢出。新任务报告才会自动记录该结果；旧任务报告不会被追溯改写。
+
+### 组合输入与导出复验
+
+截图、Spec、模拟 Figma 节点和指令已通过同一任务的接口测试；这是模拟 Figma 服务及模拟模型的测试，不等于真实 Figma 端到端联调。工作台已展示资料摘要，并提示用户在指令中处理冲突；自动识别语义冲突与逐维度来源选择尚未实现。修复候选 ZIP 已在干净目录安装并构建，确认包含修改后的标题。最新后端测试为 289 项通过。
+
+### 来源选择进展
+
+工作台已支持分别为布局、视觉样式、内容和交互选择截图、Spec、Figma 或生成指令作为参考来源，选择会写入资料集合及导出报告。截图选项当前指第一张截图。系统仍不会自动发现或阻止所有语义冲突，用户需要检查资料并在指令中明确取舍。
+
+### 本地预览稳定性与浏览器检查
+
+预览服务已复用一个本地端口，并通过任务及候选路径分发页面；两个不同任务和各自资源的隔离路由已测试。桌面与手机视口检查会记录水平溢出以及页面脚本或资源错误；存在错误时不报告通过。使用真实修复候选复测通过，使用模拟故障页面验证返回 FAIL。粘贴和拖放入口通过了浏览器合成事件测试，尚不等于操作系统剪贴板及人工拖放实测。当前后端测试 290 项通过。
+
+### 预览中选中元素进行修改
+
+工作台已接入预览选取：在仍有修改机会时点击“在预览中选取元素”，然后点击页面元素。选取时拦截点击及常见指针事件，避免触发页面原有操作；按 Escape 可取消。选中元素的 HTML 与位置描述会结合修改指令，按主工程已有的 `buildSelectedElementInstruction` 组织后发送。桥接代码仅由本地预览服务临时提供，不写入导出工程。浏览器联调使用真实候选及拦截的修复接口，已验证选取按钮不会打开弹窗且请求包含目标上下文；该测试未调用模型，尚不能证明模型每次都精准修改选中元素。
+
+### 本地停止与连接释放
+
+运行停止时，本地构建使用任务对应的进程引用，请求终止其进程树；任务取消后不会启动下一条构建命令。Windows 实测覆盖父进程、子进程和取消后禁止再次启动。供应商请求已发出时仍无法保证远端取消或不计费。SQLite 连接现按事务提交或回滚后立即关闭；真实临时工程构建及临时目录清理均已验证。启动脚本失败时也会清理本次启动的进程树。最新后端测试 293 项通过。
+
+### 模型入口与配置核对（历史快照）
+
+本地工作台服务不挂载上游独立 `/generate-code` 和 `/run_evals`、`/run_evals_stream` 模型执行入口，避免绕过工作台的模型设置及每任务请求次数限制；上游源码仍保留，只读评测与输入比较接口仍可用。该段记录的是当时的配置核对结果；当前服务能力以 `/api/d2c/v1/capabilities` 的实时响应和文末最新记录为准。
+
+### FigmaToCode 项目包接入进展
+
+工作台增加 ZIP 项目包输入，可与截图、Spec 和 Figma 节点共同作为参考。接口通过 JSON 上传 Base64 内容，读取 HTML、TSX、JSX 和 CSS 作为模型参考；从 `images` 目录读取 PNG/JPEG 并复制到生成工程的 `public/images`。不会安装或执行包内依赖和脚本，也不会直接以原项目为种子工程。上传限制为 10 MiB、250 个条目、展开后 20 MiB，源码总计 300 KB，图片最多 30 张且合计不超过 5 MiB。模拟 Vite、Next.js、HTML 结构用于验证；真实 FigmaToCode 插件导出包、真实 Figma 节点及三资料真实模型联调仍待具备资料后验证。自动视觉相似度和业务交互检查仍未实现，检查结果应如实显示未执行或待人工检查。
+
+本机浏览器检查已验证工作台可以同时添加 Spec 和项目包，页面摘要正确显示来源角色与用途，生成按钮保持可用；本次仅验证输入编排，没有发起新的模型请求。
+
+### Figma MCP Bridge 接入
+
+Figma 输入现在支持 `D2C_FIGMA_MODE=mcp`。后端通过本地 Node MCP 客户端启动 `figma-mcp-bridge/server/dist/index.js`，调用 `get_node` 和 `get_screenshot`，将节点结构与 PNG 快照转换为现有 `figma` 输入格式，后续组合输入和模型上下文不变。Bridge 仓库为 MIT 开源项目，使用前需要 Figma Desktop、导入插件并在目标文件中运行插件；服务默认只监听本机地址。它避免了本项目直接调用 Figma REST API，不需要 `FIGMA_ACCESS_TOKEN`，但不代表 Figma 官方承诺免费无限调用，仍受插件、账号权限、客户端和项目实现稳定性影响。
+
+安装与运行：
+
+```powershell
+cd D:\desktop\AI\D2C\Design2Code\figma-mcp-bridge\server
+npm install
+npm run build
+```
+
+根目录 `.env`：
+
+```env
+D2C_FIGMA_MODE=mcp
+```
+
+完成后在 Figma Desktop 导入 `figma-mcp-bridge/plugin/manifest.json`，打开目标文件并运行插件，再在工作台填写带 `node-id` 的 Figma 链接。没有运行插件时，后端会明确返回 Bridge 未连接，不会退回伪造数据。当前已完成 MCP 返回节点和 PNG 的模拟适配测试；真实插件连接和真实节点三资料模型联调仍需在 Figma Desktop 中执行。
+
+截至 2026-11-10 的验收记录：后端完整测试为 308 项通过，Pyright 为 0 errors；项目包与导出相关测试为 12 项通过；已有导出工程在独立目录重新执行 `pnpm build` 通过。构建成功后会追加本机交互冒烟检查，报告会区分自动通过与人工核对；这不代表业务语义已经验收。此前文档中“289/293/297 项”等历史数字仅对应当时的阶段快照，以本段和最新测试输出为准。
+
+### 检查报告状态
+
+新任务报告区分 PASS（通过）、FAIL（失败）、NOT_RUN（未执行）和 MANUAL_REVIEW（待人工检查）。构建通过时会列出待人工核对视觉和交互；构建失败时该项显示未执行。前端四种状态已通过模拟数据展示验证；历史任务的检查结果保留原快照，不会追溯改写。本轮后端测试 297 项通过。
+
+### 2026-11-10 文档与环境同步记录
+
+本节是当前实施状态的权威补充，若本方案前文仍出现旧阶段测试数字或旧的 Figma token 表述，以本节为准。
+
+1. **Figma MCP bridge 服务端**：已在 `figma-mcp-bridge/server` 完成 `npm install` 和 `npm run build`，产物为 `server/dist/index.js`。
+2. **Figma MCP bridge 插件端**：已在 `figma-mcp-bridge/plugin` 完成 `npm install`、`npm run build` 和 `npm run typecheck`。插件导入入口为 `figma-mcp-bridge/plugin/manifest.json`，构建产物在 `figma-mcp-bridge/plugin/dist`。
+3. **当前接入方式**：根目录 `.env` 使用 `D2C_FIGMA_MODE=mcp`。MCP 路径由本机 Node 客户端启动 bridge server，读取 `get_node` 和 `get_screenshot`；默认不依赖 `FIGMA_ACCESS_TOKEN`。REST token 只保留为兼容回退，不作为当前验收路径。
+4. **真实联调步骤**：在 Figma Desktop 导入上述 manifest，打开有权限的目标文件并运行插件；再向工作台提供带 `node-id` 的 Figma 链接。插件未运行、链接无节点标识或文件无权限时，应显示明确错误并停止该来源，不得用模拟数据冒充成功。
+5. **已验证范围**：MCP 返回节点和 PNG 的模拟适配测试通过；后端完整测试 308 项通过；Pyright 0 errors；导出工程在独立目录执行 `pnpm build` 通过。
+6. **尚未完成范围**：真实 Figma 节点读取、截图 + Spec + Figma 三资料真实模型运行、视觉相似度自动评分，以及完整业务语义验收。它们需要真实 Figma 文件和一次明确的人工视觉核对，不能由单元测试数字替代。
+7. **Windows 稳定性修复**：bridge 客户端使用 `fileURLToPath` 转换本地路径，避免 `spawn ... ENOENT`；未连接插件时，导入接口返回明确的 503 及 bridge 原因。启动脚本在健康检查前写入进程归属文件，停止脚本可清理启动后尚未完成探活的进程。
+
+最新本机验证：后端 `poetry run pytest -q` 为 308 项通过；新增 bridge 错误分支所在输入测试为 20 项通过；前端 `pnpm build` 成功；`poetry run pyright` 为 0 errors（44 条上游/类型推断 warning）。工作台健康接口返回 200，前端页面返回 200，且仅绑定 `127.0.0.1`。
+
+本节不记录任何 key、token 或完整 `.env` 内容；秘密只允许保留在本机根目录 `.env`，文档只描述字段和操作步骤。
+
+
+### 2026-11-10：真实 Figma 与输入组合补充记录
+
+Figma Desktop 插件经本机 bridge 连接后，工作台真实读取指定 Frame 的节点结构及 PNG，导入状态为 READY。启动与停止脚本现可管理工作台启动的 bridge；匿名插件会话需由用户明确绑定文件链接，插件重启后标识可能变化。
+
+使用本机接口，分别以示例截图、Spec 和真实 Figma 节点创建了 7 种资料集合：三种单独输入、三种两两组合、三种一起。七种集合均创建成功；此验证没有调用模型，不代表生成、交互及导出已完成。
+
+目前 token 与费用上限为空，预算执行代码尚未实现；依照当前目标对真实验收的预算要求，尚未发起三资料模型生成。已有请求次数、修复次数和自动重试约束不等同于 token 或费用上限。视觉还原与业务语义仍需人工核验。
