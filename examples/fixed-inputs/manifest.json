@@ -38,5 +38,13 @@
     "file": "spec.txt",
     "file_sha256": "83dcd8d956a236e88a4181983e4e0cecde8258348efbaf21bde599476ca36d76",
     "has_optional_checks": true
+  },
+  {
+    "case": "screenshot-board",
+    "type": "screenshot",
+    "historical_run": "run_548ec7fdcbff4d76ba380d202193a9af",
+    "file": "reference.png",
+    "file_sha256": "ab350b5428af0ed9f9152e2a3658cc1da96abf8b8d8726f625717f9fe0549096",
+    "has_optional_checks": false
   }
 ]
