@@ -6,6 +6,7 @@ import "./workbench.css";
 type ImageInput = { name: string; data: string };
 type Capabilities = { provider_configured: boolean; figma_mode: "mcp" | "rest"; figma_configured: boolean; generation_available: boolean; configuration_issues: string[]; token_limit_configured: boolean; cost_limit_configured: boolean };
 type SourceSet = { source_set_id: string; source_set_revision: number; source_set_hash: string };
+type PendingRun = { sourceSet: SourceSet; key: string };
 type Run = { run_id: string; status: string; error: string | null; model_requests: number; repairs: number; result: { candidate_name?: string; files: { path: string; content: string }[]; checks?: { id: string; status: string; message: string }[]; build_details?: string } | null };
 type RecentRun = { run_id: string; status: string; model_requests: number; repairs: number; created_at: string };
 type Dimension = "layout" | "style" | "content" | "behavior";
@@ -168,6 +169,7 @@ export default function D2CWorkbench() {
   const [connectionError, setConnectionError] = useState("");
   const [lastRunError, setLastRunError] = useState("");
   const [pollError, setPollError] = useState("");
+  const [pendingRun, setPendingRun] = useState<PendingRun | null>(null);
   const [run, setRun] = useState<Run | null>(null);
   const [restoreId, setRestoreId] = useState("");
   const [restoreError, setRestoreError] = useState("");
@@ -303,6 +305,13 @@ export default function D2CWorkbench() {
     finally { setFigmaChecking(false); }
   }
   useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem("d2c_pending_run");
+      if (stored) {
+        const pending = JSON.parse(stored) as PendingRun;
+        if (typeof pending.key === "string" && typeof pending.sourceSet?.source_set_id === "string" && typeof pending.sourceSet?.source_set_revision === "number" && typeof pending.sourceSet?.source_set_hash === "string") setPendingRun(pending);
+      }
+    } catch { /* A new submission will report storage issues when it is saved. */ }
     void refreshCapabilities();
     void restoreLastRun();
   }, [refreshCapabilities, restoreLastRun]);
@@ -369,6 +378,30 @@ export default function D2CWorkbench() {
     return () => { active = false; };
   }, [currentRunId, currentStatus, currentCandidate, previewAttempt]);
 
+  async function submitPendingRun(pending: PendingRun) {
+    const created = await request<{ run_id: string; status?: string }>("/runs", jsonPost(pending.sourceSet, { "Idempotency-Key": pending.key }));
+    setRun({ run_id: created.run_id, status: created.status || "CREATED", error: null, model_requests: 0, repairs: 0, result: null });
+    try {
+      window.localStorage.setItem("d2c_last_run", created.run_id);
+      window.localStorage.removeItem("d2c_pending_run");
+      setLastRunError("");
+    } catch { setLastRunError("浏览器无法保存最近任务记录，请复制当前任务 ID 以便恢复。"); }
+    setPendingRun(null);
+  }
+
+  async function recoverPendingRun() {
+    if (!pendingRun) return;
+    setBusy(true); setError("");
+    try { await submitPendingRun(pendingRun); }
+    catch { setError("仍无法确认任务是否创建。请检查服务连接后再次恢复，或查看最近的本机任务。"); }
+    finally { setBusy(false); }
+  }
+
+  function discardPendingRun() {
+    try { window.localStorage.removeItem("d2c_pending_run"); setPendingRun(null); setError(""); }
+    catch { setError("无法清除恢复记录，请检查浏览器本地存储。"); }
+  }
+
   async function handleGenerate() {
     if (!images.length && !spec.trim() && !figma.trim() && !bundle) { setError("请至少添加一份设计资料。"); return; }
     setBusy(true); setError(""); setSelectedFile(0); setPreview(""); setView("preview");
@@ -403,12 +436,13 @@ export default function D2CWorkbench() {
       }
       const sourceSet = await request<SourceSet>("/source-sets", jsonPost({ sources, instructions: instruction, authority_by_dimension: authorityByDimension }));
       await request(`/source-sets/${sourceSet.source_set_id}/confirm`, jsonPost(sourceSet));
-      const created = await request<{ run_id: string; status: string }>("/runs", jsonPost(sourceSet, { "Idempotency-Key": crypto.randomUUID() }));
-      // Keep the acknowledged ID visible even if browser storage or the next
-      // status request fails; polling will fetch the authoritative result.
-      setRun({ run_id: created.run_id, status: created.status || "CREATED", error: null, model_requests: 0, repairs: 0, result: null });
-      try { window.localStorage.setItem("d2c_last_run", created.run_id); setLastRunError(""); }
-      catch { setLastRunError("浏览器无法保存最近任务记录，请复制当前任务 ID 以便恢复。"); }
+      const pending = { sourceSet, key: crypto.randomUUID() };
+      // Store before sending: a lost response can then be recovered with the same key.
+      try { window.localStorage.setItem("d2c_pending_run", JSON.stringify(pending)); }
+      catch { throw new Error("无法保存任务恢复信息，请允许浏览器本地存储后再生成。"); }
+      setPendingRun(pending);
+      try { await submitPendingRun(pending); }
+      catch { throw new Error("任务创建结果尚未确认，请使用下方的恢复按钮；不要重复新建。"); }
     } catch (caught) { setError(caught instanceof Error ? caught.message : "操作失败，请重试。"); }
     finally { setBusy(false); }
   }
@@ -502,7 +536,8 @@ export default function D2CWorkbench() {
           <p>资料存在冲突时，请在生成指令中写明以哪一份为准。系统不会自动判断所有冲突。</p>
         </div>
         {error && <div className="d2c-error" role="alert">{error}</div>}
-        <button className="d2c-generate" disabled={isRunning || imageReads > 0 || !capabilities?.generation_available} onClick={() => void handleGenerate()}>{isRunning ? <><LuRefreshCw className="d2c-spin" /> 正在处理</> : <>确认资料并生成 <LuArrowUpRight /></>}</button>
+        {pendingRun && <div className="d2c-error" role="status"><strong>有一项任务的创建结果待确认</strong><p>恢复会使用原来的请求标识；如果请求尚未到达服务端，恢复会创建任务并可能调用模型。</p><button type="button" disabled={busy} onClick={() => void recoverPendingRun()}>恢复任务创建</button> <button type="button" disabled={busy} onClick={discardPendingRun}>放弃恢复</button><p>放弃只清除本机恢复记录，不会停止可能已创建的任务；请先查看最近的本机任务。</p></div>}
+        <button className="d2c-generate" disabled={isRunning || !!pendingRun || imageReads > 0 || !capabilities?.generation_available} onClick={() => void handleGenerate()}>{isRunning ? <><LuRefreshCw className="d2c-spin" /> 正在处理</> : <>确认资料并生成 <LuArrowUpRight /></>}</button>
         {run && ["CREATED", "GENERATING", "BUILDING", "REPAIRING"].includes(run.status) && <button type="button" disabled={busy} onClick={() => void handleStop()}>停止当前任务</button>}
         {!capabilities?.generation_available && <div className="d2c-help" role="status">
           <p>{connectionError || (!capabilities ? "正在检查本机服务…" : "生成暂不可用，请检查以下配置和依赖。")}</p>
