@@ -551,8 +551,14 @@ export default function D2CWorkbench() {
     catch { setError("无法清除恢复记录，请检查浏览器本地存储。"); }
   }
 
+  const sourceLabels: Record<string, string> = { screenshot: "第一张截图", spec: "Spec", figma: "Figma", figma_bundle: "FigmaToCode 项目包", instructions: "生成指令" };
+  const sourceAvailable: Record<string, boolean> = { screenshot: images.length > 0, spec: !!spec.trim(), figma: !!figma.trim(), figma_bundle: !!bundle, instructions: !!instruction.trim() };
+  const dimensionLabels: Record<Dimension, string> = { layout: "布局", style: "视觉样式", content: "内容", behavior: "交互" };
+  const missingAuthority = (Object.keys(dimensionLabels) as Dimension[]).filter((dimension) => authority[dimension] && !sourceAvailable[authority[dimension]]);
+
   async function handleGenerate() {
     if (!images.length && !spec.trim() && !figma.trim() && !bundle) { setError("请至少添加一份设计资料。"); return; }
+    if (missingAuthority.length) { setError(`来源规则已失效：${missingAuthority.map((dimension) => dimensionLabels[dimension]).join("、")}。请重新选择或补回资料。`); return; }
     const searchValues = Object.values(searchRule).map((value) => value.trim());
     if (searchValues.some(Boolean) && (searchValues.some((value) => !value) || searchValues[2] === searchValues[3])) { setError("搜索验收请填写全部四项，且两条示例文本必须不同。"); return; }
     const dialogValues = Object.values(dialogRule).map((value) => value.trim());
@@ -738,12 +744,17 @@ export default function D2CWorkbench() {
         <details><summary>选择各维度的参考来源（可选）</summary>
           {([ ["layout", "布局"], ["style", "视觉样式"], ["content", "内容"], ["behavior", "交互"] ] as const).map(([dimension, label]) =>
             <label className="d2c-label" key={dimension}>{label}<select value={authority[dimension]} onChange={(event) => setAuthority((previous) => ({ ...previous, [dimension]: event.target.value }))}>
-              <option value="">按资料角色参考</option>{images.length > 0 && <option value="screenshot">第一张截图</option>}{spec.trim() && <option value="spec">Spec</option>}{figma.trim() && <option value="figma">Figma</option>}{bundle && <option value="figma_bundle">FigmaToCode 项目包</option>}{instruction.trim() && <option value="instructions">生成指令</option>}
+              <option value="">按资料角色参考</option>{authority[dimension] && !sourceAvailable[authority[dimension]] && <option value={authority[dimension]}>{sourceLabels[authority[dimension]] || "未知来源"}（已失效）</option>}{images.length > 0 && <option value="screenshot">第一张截图</option>}{spec.trim() && <option value="spec">Spec</option>}{figma.trim() && <option value="figma">Figma</option>}{bundle && <option value="figma_bundle">FigmaToCode 项目包</option>}{instruction.trim() && <option value="instructions">生成指令</option>}
             </select></label>)}
         </details>
         <div className="d2c-help d2c-material-summary" aria-label="本次资料摘要">
           <strong>本次资料摘要</strong>
           <p>{images.length ? `${images.length} 张截图作为视觉参考` : "未添加截图"}；{spec.trim() ? "Spec 作为内容与交互参考" : "未添加 Spec"}；{figma.trim() ? "Figma 作为结构参考" : "未添加 Figma"}；{bundle ? "项目包作为源码和图片参考" : "未添加项目包"}。</p>
+          <p>来源规则：{(Object.keys(dimensionLabels) as Dimension[]).map((dimension) => {
+            const choice = authority[dimension];
+            return `${dimensionLabels[dimension]}：${choice ? `${sourceLabels[choice] || "未知来源"}${sourceAvailable[choice] ? "" : "（已失效）"}` : "按资料角色参考"}`;
+          }).join("；")}。</p>
+          {missingAuthority.length > 0 && <p role="alert">来源规则已失效：{missingAuthority.map((dimension) => dimensionLabels[dimension]).join("、")}。请重新选择或补回资料。</p>}
           <p>搜索功能验收：{searchSummary}{searchSummary === "已设置" ? `（搜索词：${searchRule.query.trim()}）` : ""}。</p>
           <p>弹窗功能验收：{dialogSummary}。</p>
           <p>标签页功能验收：{tabSummary}。</p>
