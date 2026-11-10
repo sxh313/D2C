@@ -192,6 +192,15 @@
 .d2c-previous p { margin: 6px 0 10px; }
 .d2c-previous button, .d2c-previous a { display: inline-block; margin: 0 8px 8px 0; padding: 8px 10px; border: 1px solid #b5ced9; border-radius: 6px; color: #205f79; background: #fff; font: inherit; text-decoration: none; cursor: pointer; }
 .d2c-previous iframe { margin-top: 8px; }
+.d2c-history { margin: 0 0 14px; padding: 11px 13px; border: 1px solid #dce8ed; border-radius: 8px; background: #f8fbfc; font-size: 12px; }
+.d2c-history summary { font-weight: 600; }
+.d2c-history button { padding: 7px 10px; border: 1px solid #c9dfe8; border-radius: 6px; color: #285e83; background: #fff; cursor: pointer; }
+.d2c-history button:disabled { opacity: .6; cursor: wait; }
+.d2c-history-list { display: grid; gap: 0; margin: 12px 0 0; padding: 0; list-style: none; }
+.d2c-history-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 7px 0; border-top: 1px solid #e3edf0; }
+.d2c-history-list li span { min-width: 25px; color: #6f8792; font-family: Consolas, monospace; }
+.d2c-history-list li strong { color: #355c6d; }
+.d2c-history-list time { margin-left: auto; color: #637e8a; }
 .d2c-shell button:not(:disabled):hover, .d2c-shell a:hover { filter: brightness(.95); }
 @media (max-width: 850px) { .d2c-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 520px) {
