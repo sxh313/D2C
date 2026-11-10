@@ -82,4 +82,6 @@
 .d2c-visual-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .d2c-visual-grid > div { min-width: 0; overflow: auto; max-height: 600px; border: 1px solid #dce2e9; padding: 8px; }
 .d2c-visual-grid img { display: block; width: 100%; height: auto; margin-top: 8px; }
+.d2c-overlay { display: grid; overflow: auto; max-height: 600px; border: 1px solid #dce2e9; }
+.d2c-overlay img { display: block; grid-area: 1 / 1; width: 100%; height: auto; align-self: start; }
 @media (max-width: 700px) { .d2c-visual-grid { grid-template-columns: 1fr; } }

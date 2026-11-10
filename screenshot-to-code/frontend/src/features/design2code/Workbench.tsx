@@ -84,6 +84,8 @@ function VisualReview({ runId, candidate }: { runId: string; candidate?: string 
   const [viewport, setViewport] = useState<"desktop" | "mobile">("desktop");
   const [error, setError] = useState("");
   const [imageError, setImageError] = useState(false);
+  const [overlay, setOverlay] = useState(false);
+  const [opacity, setOpacity] = useState(50);
   useEffect(() => {
     let active = true;
     setReferences([]); setSelected(0); setError("");
@@ -94,16 +96,19 @@ function VisualReview({ runId, candidate }: { runId: string; candidate?: string 
   }, [runId]);
   useEffect(() => { setImageError(false); }, [runId, candidate, viewport]);
   return <details className="d2c-visual-review"><summary>人工视觉对照</summary>
-    <p className="d2c-help">参考图与构建时截图并排展示。尺寸和资料用途可能不同，请结合来源规则人工判断；这里不计算相似度，也不会自动判定通过。</p>
+    <p className="d2c-help">参考图与构建时截图可以并排或叠加查看。尺寸和资料用途可能不同，请结合来源规则人工判断；这里不计算相似度，也不会自动判定通过。</p>
     {error && <p role="alert">{error}</p>}
     <div className="d2c-visual-controls">
       <label>参考图 <select value={selected} onChange={(event) => setSelected(Number(event.target.value))} disabled={!references.length}>
         {references.length ? references.map((item, index) => <option key={item.id} value={index}>{item.type === "figma" ? "Figma" : "截图"}：{item.name}</option>) : <option>没有图片参考</option>}
       </select></label>
       <label>生成页面 <select value={viewport} onChange={(event) => setViewport(event.target.value as "desktop" | "mobile")}><option value="desktop">桌面 1440 × 900</option><option value="mobile">手机 390 × 844</option></select></label>
+      <label><span>对照方式</span><select value={overlay ? "overlay" : "side"} onChange={(event) => setOverlay(event.target.value === "overlay")}><option value="side">并排</option><option value="overlay">叠加</option></select></label>
+      {overlay && <label>生成页面透明度：{opacity}%<input type="range" min="0" max="100" value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} /></label>}
     </div>
-    <div className="d2c-visual-grid"><div><strong>任务参考图</strong>{references[selected] ? <img src={references[selected].data_url} alt="任务参考图" /> : <p>本任务没有截图或 Figma 参考图。</p>}</div>
+    {overlay && references[selected] && !imageError ? <><p className="d2c-help">两张图片按各自宽度等比缩放并从顶部对齐；页面尺寸或滚动长度不同时，重叠差异可能来自缩放，请结合并排视图判断。</p><div className="d2c-overlay"><img src={references[selected].data_url} alt="任务参考图" /><img className="d2c-overlay-result" style={{ opacity: opacity / 100 }} src={`${api}/runs/${runId}/inspection-image/${viewport}?candidate=${encodeURIComponent(candidate || "candidate")}`} alt="叠加的生成页面检查截图" onError={() => setImageError(true)} /></div></> : <div className="d2c-visual-grid"><div><strong>任务参考图</strong>{references[selected] ? <img src={references[selected].data_url} alt="任务参考图" /> : <p>本任务没有截图或 Figma 参考图。</p>}</div>
       <div><strong>构建时页面截图</strong>{imageError ? <p>该视口截图未生成，请检查构建和视口检查结果。</p> : <img src={`${api}/runs/${runId}/inspection-image/${viewport}?candidate=${encodeURIComponent(candidate || "candidate")}`} alt="生成页面检查截图" onError={() => setImageError(true)} />}</div></div>
+    }
   </details>;
 }
 
