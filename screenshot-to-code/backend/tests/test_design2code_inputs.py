@@ -156,11 +156,22 @@ def test_manual_review_is_bound_to_candidate_and_does_not_change_checks(tmp_path
     candidate = tmp_path / "runs" / "run_review" / "candidate"
     candidate.mkdir(parents=True)
     (candidate / "package.json").write_text("{}", encoding="utf-8")
+    (candidate / "README.md").write_text("generated readme", encoding="utf-8")
+    (candidate / "report.json").write_text("generated report", encoding="utf-8")
+    (candidate / "report.generated.json").write_text("existing file", encoding="utf-8")
+    (candidate / "docs").mkdir()
+    (candidate / "docs" / "README.md").write_text("nested readme", encoding="utf-8")
     monkeypatch.setattr(d2c_routes, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
     monkeypatch.setattr(d2c_routes, "get_source_set", lambda *_args: {"sources": []})
     exported = client.get("/api/d2c/v1/runs/run_review/export")
     assert exported.status_code == 200
     with zipfile.ZipFile(io.BytesIO(exported.content)) as archive:
+        assert archive.namelist().count("design2code-page/README.md") == 1
+        assert archive.namelist().count("design2code-page/report.json") == 1
+        assert archive.read("design2code-page/README.md") == b"generated readme"
+        assert archive.read("design2code-page/report.generated.json") == b"existing file"
+        assert archive.read("design2code-page/generated-report.generated.json") == b"generated report"
+        assert archive.read("design2code-page/docs/README.md") == b"nested readme"
         report = json.loads(archive.read("design2code-page/report.json"))
     assert report["manual_review"]["visual"] == "PASS" and report["checks"] == result["checks"]
     with storage.connect() as db:

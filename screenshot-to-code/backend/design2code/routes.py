@@ -484,11 +484,19 @@ async def export_run(run_id: str, version: Literal["current", "previous"] = "cur
     manual_review: dict[str, Any] | None = {**json.loads(review_row["data_json"]), "created_at": review_row["created_at"]} if review_row else None
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        has_readme = (candidate / "README.md").is_file() and not (candidate / "README.md").is_symlink()
+        original_report = candidate / "report.json"
+        if original_report.is_file() and not original_report.is_symlink():
+            preserved = "report.generated.json"
+            while (candidate / preserved).exists():
+                preserved = "generated-" + preserved
+            archive.write(original_report, f"design2code-page/{preserved}")
         for path in sorted(candidate.rglob("*")):
             rel = path.relative_to(candidate)
-            if path.is_file() and not path.is_symlink() and not ({"node_modules", "dist", ".git"} & set(rel.parts)) and path.name != ".env":
+            if path.is_file() and not path.is_symlink() and not ({"node_modules", "dist", ".git"} & set(rel.parts)) and path.name != ".env" and rel.as_posix() != "report.json":
                 archive.write(path, f"design2code-page/{rel.as_posix()}")
-        archive.writestr("design2code-page/README.md", "# Design2Code 页面\n\n使用 Node.js 和 pnpm，运行 `pnpm install --frozen-lockfile`，再运行 `pnpm dev`。\n")
+        if not has_readme:
+            archive.writestr("design2code-page/README.md", "# Design2Code 页面\n\n使用 Node.js 和 pnpm，运行 `pnpm install --frozen-lockfile`，再运行 `pnpm dev`。\n")
         archive.writestr("design2code-page/report.json", json_encode({
             "run_id": run_id, "status": run["status"], "source_set_hash": run["source_set_hash"],
             "model_requests": run["model_requests"], "candidate_version": version, "candidate_name": candidate_name,

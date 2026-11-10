@@ -2374,3 +2374,8 @@ README 首次准备已补充后端、前端、Bridge server 和插件构建命�
 
 - 下载 `run_5b549d67725047a283a64f9bbca84d82` 的 candidate-2 ZIP，在新建临时目录解压，使用 `pnpm install --frozen-lockfile` 安装并构建成功；依赖全部来自本机缓存，pnpm 提示忽略 esbuild 构建脚本。启动本地 Vite 后首页 HTTP 200，随后停止该验证服务。
 - 导出 report.json 确认任务 ID、candidate-2、模型请求 2 次；build、viewport、interaction_smoke 为 PASS，visual、interactions 为 NOT_RUN，manual_review 为 MANUAL_REVIEW。此次没有在干净机器或空缓存环境安装，也没有重新调用模型。
+
+### 2026-11-11：导出文件名冲突处理
+
+- 导出时保留生成工程的根目录 README；如果生成工程含 `report.json`，将其以不冲突的 `report.generated.json` 等名称保留，导出报告始终占用根目录 `report.json`，避免 ZIP 重名。嵌套目录的同名文件保持原路径。
+- 后端隔离测试验证同名冲突、已有重命名目标、嵌套 README 和原报告解析；相关 4 项通过。运行中的后端需要重启才会加载改动；未修改历史任务或调用模型。
