@@ -430,6 +430,46 @@ async def test_failed_build_report_distinguishes_unrun_checks(tmp_path: Path, mo
 
 
 @pytest.mark.asyncio
+async def test_repair_output_survives_restart_during_build(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
+    monkeypatch.setattr(runs, "get_settings", lambda: SimpleNamespace(model_ready=True, token_limit=None,
+        cost_limit_micro_usd=None, model_request_limit=2, repair_limit=1))
+    monkeypatch.setattr(runs, "get_source_set", lambda *_args: {"search_check": {"query": "x"}})
+    started, release = threading.Event(), threading.Event()
+
+    def blocked_build(*_args: Any) -> dict[str, Any]:
+        started.set()
+        assert release.wait(10)
+        return {"status": "FAIL", "message": "interrupted"}
+
+    async def fake_generate(*_args: Any, **_kwargs: Any) -> tuple[str, dict[str, Any]]:
+        return ('{"files":[{"path":"src/App.tsx","content":"new"},{"path":"src/index.css","content":""}]}', {})
+
+    monkeypatch.setattr(runs, "generate", fake_generate)
+    monkeypatch.setattr(runs, "build_candidate", blocked_build)
+    original = {"files": [{"path": "src/App.tsx", "content": "old"}], "checks": [{"id": "build", "status": "PASS"}]}
+    with storage.connect() as db:
+        db.execute("INSERT INTO runs (id,set_id,revision,source_hash,idempotency_key,request_hash,status,calls,result_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                   ("run_interrupted_repair", "set", 1, "hash", "interrupted-key", "hash", "READY_FOR_REVIEW", 1,
+                    json.dumps(original), storage.now(), storage.now()))
+    assert runs.request_repair("run_interrupted_repair", "change", "interrupted-repair")
+    task = asyncio.create_task(runs.execute_repair("run_interrupted_repair", "change"))
+    try:
+        assert await asyncio.to_thread(started.wait, 5)
+        runs.recover_interrupted_runs()
+    finally:
+        release.set()
+        await task
+    run = runs.read_run("run_interrupted_repair")
+    assert run is not None and run["status"] == "FAILED"
+    assert run["result"]["files"][0]["content"] == "new"
+    assert run["result"]["previous_candidate"] == original
+    checks = {item["id"]: item["status"] for item in run["result"]["checks"]}
+    assert checks["build"] == checks["spec_search_01"] == "NOT_RUN"
+    assert run["model_requests"] == 2 and run["repairs"] == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("interrupt", ["none", "stop", "restart"])
 async def test_repair_execution_claim_prevents_duplicate_model_calls(tmp_path: Path, monkeypatch: MonkeyPatch, interrupt: str) -> None:
     monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))

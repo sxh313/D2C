@@ -276,13 +276,28 @@ async def execute_repair(run_id: str, instruction: str) -> None:
                                 "build_details": original.get("build_details", "")})
         text, usage = await generate(get_settings(), source_set, repair_context=feedback)
         files = parse_files(text)
+        result: dict[str, Any] = {
+            "files": files, "usage": usage, "cost": None, "cost_status": "UNKNOWN",
+            "candidate_name": "candidate-2", "previous_candidate": original,
+            "checks": [
+                {"id": "build", "status": "NOT_RUN", "message": "修改结果已保存，构建尚未完成。"},
+                _visual_check(source_set, repaired=True),
+                {"id": "interactions", "status": "NOT_RUN", "message": "修复后的交互尚未执行检查。"},
+                {"id": "manual_review", "status": "NOT_RUN", "message": "构建通过后才能人工核对页面。"},
+            ],
+        }
+        for field, check_id, label in (("search_check", "spec_search_01", "搜索"),
+                                       ("dialog_check", "spec_dialog_01", "弹窗"),
+                                       ("tab_check", "spec_tab_01", "标签页")):
+            if source_set.get(field):
+                result["checks"].append({"id": check_id, "status": "NOT_RUN", "message": f"构建尚未完成，{label}验收未执行。"})
         with connect() as db:
-            changed = db.execute("UPDATE runs SET status = 'BUILDING', updated_at = ? WHERE id = ? AND status = 'REPAIRING'", (now(), run_id))
+            changed = db.execute("UPDATE runs SET status = 'BUILDING', result_json = ?, updated_at = ? WHERE id = ? AND status = 'REPAIRING'", (json_encode(result), now(), run_id))
             if not changed.rowcount:
                 return
             _event(db, run_id, "BUILDING", {"status": "BUILDING", "purpose": "repair"})
         build = await asyncio.to_thread(build_candidate, run_id, files, "candidate-2")
-        result: dict[str, Any] = {
+        result = {
             "files": files, "usage": usage, "cost": None, "cost_status": "UNKNOWN",
             "candidate_name": "candidate-2", "previous_candidate": original,
             "checks": [
