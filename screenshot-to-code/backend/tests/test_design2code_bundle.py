@@ -2,6 +2,11 @@
 
 import base64
 import io
+import json
+import os
+import re
+import urllib.parse
+import urllib.request
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +20,7 @@ from pytest import MonkeyPatch
 
 import design2code.provider as provider
 import design2code.runner as runner
+import design2code.runs as runs
 import design2code.storage as storage
 from design2code.routes import router
 
@@ -108,3 +114,36 @@ def test_bundle_asset_copied_into_candidate(tmp_path: Path, monkeypatch: MonkeyP
     monkeypatch.setattr(runner, "_run_build_command", fake_build)
     assert runner.build_candidate("run_bundle", [{"path": "src/App.tsx", "content": "export default 1"}])["status"] == "PASS"
     assert (tmp_path / "runs/run_bundle/candidate/public/images/logo.png").read_bytes() == png()
+
+
+@pytest.mark.skipif(os.environ.get("D2C_REAL_BUILD_TEST") != "1", reason="requires pnpm and a real dependency installation")
+def test_bundle_asset_survives_real_build_and_nested_preview(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """Synthetic archive and model output, real import, Vite build and preview server."""
+    client = client_for(tmp_path, monkeypatch)
+    response = client.post("/api/d2c/v1/design-inputs", json={"input_type": "figma_bundle", "content": bundle([
+        ("src/App.tsx", b"export default 1"), ("public/images/logo.png", png())])})
+    assert response.status_code == 200
+    source = client.post("/api/d2c/v1/source-sets", json={"sources": [{"input_id": response.json()["input_id"]}]}).json()
+    with storage.connect() as db:
+        db.execute("INSERT INTO runs (id,set_id,revision,source_hash,idempotency_key,request_hash,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                   ("run_bundle_real", source["source_set_id"], 1, "hash", "bundle-real", "hash", "BUILDING", storage.now(), storage.now()))
+    settings = SimpleNamespace(runtime_dir=tmp_path, build_timeout=180, preview_host="127.0.0.1", preview_port_start=19380, preview_port_end=19400)
+    monkeypatch.setattr(runner, "get_settings", lambda: settings)
+    files = runs.parse_files(json.dumps({"files": [
+        {"path": "src/App.tsx", "content": 'import "./index.css"; export default function App() { return <div className="logo"/> }'},
+        {"path": "src/index.css", "content": '.logo { background-image: url("./images/logo.png"); }'},
+    ]}))
+    assert runner.build_candidate("run_bundle_real", files)["status"] == "PASS"
+    try:
+        url = runner.preview_url("run_bundle_real", settings)
+        with urllib.request.urlopen(url) as response:
+            html = response.read().decode()
+        css_path = re.search(r'href="([^\"]+\.css)"', html).group(1)
+        with urllib.request.urlopen(urllib.parse.urljoin(url, css_path)) as response:
+            css = response.read().decode()
+        image_path = re.search(r'url\(["\']?([^"\')]+logo\.png)', css).group(1)
+        with urllib.request.urlopen(urllib.parse.urljoin(urllib.parse.urljoin(url, css_path), image_path)) as response:
+            assert response.headers.get_content_type() == "image/png"
+            assert response.read() == png()
+    finally:
+        runner.close_previews()
