@@ -208,6 +208,14 @@ async def test_visual_diff_uses_only_task_references(tmp_path: Path, monkeypatch
     monkeypatch.setattr(d2c_routes, "get_input", lambda _id: {"input_type": "screenshot", "data": {"content_base64": base64.b64encode(image.getvalue()).decode()}})
     monkeypatch.setattr(d2c_routes, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
     assert (await d2c_routes.visual_diff("run_test", "reference", "mobile"))["mean_channel_difference"] == 0
+    assert (await d2c_routes.visual_diff("run_test", "reference", "mobile", "candidate"))["mean_channel_difference"] == 0
+    assert (await d2c_routes.inspection_image("run_test", "mobile", "candidate")).path == path
+    with pytest.raises(HTTPException) as changed_image:
+        await d2c_routes.inspection_image("run_test", "mobile", "candidate-2")
+    assert changed_image.value.status_code == 409
+    with pytest.raises(HTTPException) as changed_diff:
+        await d2c_routes.visual_diff("run_test", "reference", "mobile", "candidate-2")
+    assert changed_diff.value.status_code == 409
     with pytest.raises(HTTPException) as exc:
         await d2c_routes.visual_diff("run_test", "unrelated", "mobile")
     assert exc.value.status_code == 404

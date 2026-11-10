@@ -279,14 +279,16 @@ async def visual_references(run_id: str) -> dict[str, Any]:
 
 
 @router.get("/runs/{run_id}/inspection-image/{viewport}")
-async def inspection_image(run_id: str, viewport: Literal["desktop", "tablet", "mobile"]) -> FileResponse:
+async def inspection_image(run_id: str, viewport: Literal["desktop", "tablet", "mobile"], candidate: Literal["candidate", "candidate-2"] | None = None) -> FileResponse:
     run = read_run(run_id)
     if run is None:
         raise HTTPException(404, "找不到该任务。")
-    candidate = (run["result"] or {}).get("candidate_name", "candidate")
-    if candidate not in {"candidate", "candidate-2"}:
+    current = (run["result"] or {}).get("candidate_name", "candidate")
+    if current not in {"candidate", "candidate-2"}:
         raise HTTPException(404, "找不到检查截图。")
-    path = get_settings().runtime_dir / "runs" / run_id / candidate / f"inspection-{viewport}.png"
+    if candidate is not None and candidate != current:
+        raise HTTPException(409, "任务版本已变化，请刷新任务后重新查看截图。")
+    path = get_settings().runtime_dir / "runs" / run_id / current / f"inspection-{viewport}.png"
     if not path.is_file():
         raise HTTPException(404, "该视口的检查截图未生成。")
     return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-store"})
@@ -314,7 +316,7 @@ def _pixel_difference(reference: bytes, candidate_path: Any) -> dict[str, Any]:
 
 
 @router.get("/runs/{run_id}/visual-diff/{input_id}/{viewport}")
-async def visual_diff(run_id: str, input_id: str, viewport: Literal["desktop", "tablet", "mobile", "reference"]) -> dict[str, Any]:
+async def visual_diff(run_id: str, input_id: str, viewport: Literal["desktop", "tablet", "mobile", "reference"], candidate: Literal["candidate", "candidate-2"] | None = None) -> dict[str, Any]:
     run = read_run(run_id)
     if run is None:
         raise HTTPException(404, "找不到该任务。")
@@ -324,9 +326,11 @@ async def visual_diff(run_id: str, input_id: str, viewport: Literal["desktop", "
     item = get_input(input_id)
     if not item or item["input_type"] not in {"screenshot", "figma"} or not item["data"].get("content_base64"):
         raise HTTPException(404, "找不到任务参考图。")
-    candidate = (run["result"] or {}).get("candidate_name", "candidate")
-    if candidate not in {"candidate", "candidate-2"}:
+    current = (run["result"] or {}).get("candidate_name", "candidate")
+    if current not in {"candidate", "candidate-2"}:
         raise HTTPException(404, "找不到检查截图。")
+    if candidate is not None and candidate != current:
+        raise HTTPException(409, "任务版本已变化，请刷新任务后重新比较。")
     reference = base64.b64decode(item["data"]["content_base64"])
     if viewport == "reference":
         if not _can_preview(run):
@@ -336,7 +340,7 @@ async def visual_diff(run_id: str, input_id: str, viewport: Literal["desktop", "
                 width, height = image.size
             if width > 2000 or height > 2000 or width * height > 4_000_000:
                 raise HTTPException(422, "参考图宽高须各不超过 2000 像素，且不超过 400 万像素。")
-            captured, warnings = await capture_reference_viewport(run_id, candidate, width, height)
+            captured, warnings = await capture_reference_viewport(run_id, current, width, height)
             result = await asyncio.to_thread(_pixel_difference, reference, io.BytesIO(captured))
             result["capture"] = "reference_viewport"
             result["warnings"] = warnings
@@ -346,7 +350,7 @@ async def visual_diff(run_id: str, input_id: str, viewport: Literal["desktop", "
             raise
         except Exception as exc:
             raise HTTPException(503, "无法按参考图尺寸截取预览，请检查本地预览和 Chromium。") from exc
-    path = get_settings().runtime_dir / "runs" / run_id / candidate / f"inspection-{viewport}.png"
+    path = get_settings().runtime_dir / "runs" / run_id / current / f"inspection-{viewport}.png"
     if not path.is_file():
         raise HTTPException(404, "该视口的检查截图未生成。")
     return await asyncio.to_thread(_pixel_difference, reference, path)
