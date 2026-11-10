@@ -60,6 +60,24 @@ def test_visual_check_only_marks_proven_spec_only_inapplicable(monkeypatch: Monk
         assert runs._visual_check(source(*ids))["status"] == "NOT_RUN"
 
 
+def test_source_set_confirmation_is_read_from_matching_record(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+    item = client.post("/api/d2c/v1/design-inputs", json={"input_type": "spec", "content": "Example"}).json()
+    source = client.post("/api/d2c/v1/source-sets", json={"sources": [{"input_id": item["input_id"]}]}).json()
+    path = f"/api/d2c/v1/source-sets/{source['source_set_id']}"
+    assert client.get(path).json()["confirmed"] is False
+    confirmation = {key: source[key] for key in ("source_set_revision", "source_set_hash")}
+    assert client.post(path + "/confirm", json=confirmation).json()["confirmed"] is True
+    assert client.get(path).json()["confirmed"] is True
+    assert storage.get_source_set(source["source_set_id"], source["source_set_revision"])["confirmed"] is True
+    with storage.connect() as db:
+        db.execute("UPDATE source_confirmations SET source_hash = ? WHERE set_id = ?", ("different", source["source_set_id"]))
+    assert client.get(path).json()["confirmed"] is False
+
+
 def test_search_rule_is_validated_and_frozen_with_source_set(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
     app = FastAPI()

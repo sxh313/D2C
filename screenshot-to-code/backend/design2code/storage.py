@@ -95,7 +95,11 @@ def get_source_set(set_id: str, revision: int | None = None) -> dict[str, Any] |
             row = db.execute("SELECT * FROM source_sets WHERE id = ? ORDER BY revision DESC LIMIT 1", (set_id,)).fetchone()
         else:
             row = db.execute("SELECT * FROM source_sets WHERE id = ? AND revision = ?", (set_id, revision)).fetchone()
+        confirmed = row is not None and db.execute(
+            "SELECT 1 FROM source_confirmations WHERE set_id = ? AND revision = ? AND source_hash = ?",
+            (row["id"], row["revision"], row["source_hash"]),
+        ).fetchone() is not None
     if row is None:
         return None
     return {"source_set_id": row["id"], "source_set_revision": row["revision"],
-            "source_set_hash": row["source_hash"], **json.loads(row["data_json"])}
+            "source_set_hash": row["source_hash"], **json.loads(row["data_json"]), "confirmed": confirmed}
