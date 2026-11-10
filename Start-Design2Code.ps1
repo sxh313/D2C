@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $projectRoot = $PSScriptRoot
 $envPath = Join-Path $projectRoot '.env'
 $backendDir = Join-Path $projectRoot 'screenshot-to-code\backend'
@@ -65,15 +65,19 @@ try {
     if ($settings.D2C_FIGMA_MODE -eq 'mcp') {
         $bridgeDir = Join-Path $projectRoot 'figma-mcp-bridge\server'
         $bridgePath = Join-Path $bridgeDir 'workbench-bridge.mjs'
-        if (-not (Test-Path -LiteralPath (Join-Path $bridgeDir 'dist\index.js'))) { throw 'Figma bridge 尚未构建，请先在 server 目录运行 npm install 和 npm run build。' }
-        if (Get-NetTCPConnection -LocalPort 1994 -State Listen -ErrorAction SilentlyContinue) {
-            try { $ping = Invoke-RestMethod -Uri 'http://127.0.0.1:1994/ping' -TimeoutSec 2 } catch { throw '端口 1994 已被其他服务占用，请检查后重试。' }
-            if ($ping.status -ne 'ok' -or -not $ping.version) { throw '端口 1994 的服务不是可识别的 Figma bridge。' }
-            Write-Output '复用已运行的 Figma bridge；停止工作台时不会关闭该外部进程。'
+        if (-not (Test-Path -LiteralPath (Join-Path $bridgeDir 'dist\index.js'))) {
+            Write-Warning 'Figma bridge 尚未构建；截图和 Spec 仍可使用。需要 Figma 时请先构建 bridge。'
+        } elseif (Get-NetTCPConnection -LocalPort 1994 -State Listen -ErrorAction SilentlyContinue) {
+            try {
+                $ping = Invoke-RestMethod -Uri 'http://127.0.0.1:1994/ping' -TimeoutSec 2
+                if ($ping.status -ne 'ok' -or -not $ping.version) { throw 'unexpected bridge response' }
+                Write-Output '复用已运行的 Figma bridge；停止工作台时不会关闭该外部进程。'
+            } catch { Write-Warning 'Figma bridge 端口不可用；截图和 Spec 仍可使用，请检查端口 1994。' }
         } else {
-            $bridge = Start-Process -FilePath $node.Source -ArgumentList @('"' + $bridgePath + '"') -WorkingDirectory $bridgeDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runtimeDir 'bridge.out.log') -RedirectStandardError (Join-Path $runtimeDir 'bridge.err.log')
-            $started += $bridge
-            Save-StartedProcesses
+            try {
+                $bridge = Start-Process -FilePath $node.Source -ArgumentList @('"' + $bridgePath + '"') -WorkingDirectory $bridgeDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runtimeDir 'bridge.out.log') -RedirectStandardError (Join-Path $runtimeDir 'bridge.err.log')
+            } catch { Write-Warning 'Figma bridge 启动失败；截图和 Spec 仍可使用。' }
+            if ($bridge) { $started += $bridge; Save-StartedProcesses }
         }
     }
     $backendArgs = @('-m', 'uvicorn', 'main:app', '--host', $backendHost, '--port', "$backendPort", '--workers', '1')
@@ -91,12 +95,15 @@ try {
         try {
             $null = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri "http://${backendHost}:${backendPort}/api/d2c/v1/capabilities"
             $null = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri "http://${webHost}:${webPort}/"
-            if ($bridge) { $ping = Invoke-RestMethod -Uri 'http://127.0.0.1:1994/ping' -TimeoutSec 2; if ($ping.status -ne 'ok') { continue } }
             $ready = $true
             break
         } catch { }
     }
     if (-not $ready) { throw '启动未完成，请检查 D2C_RUNTIME_DIR 目录下的服务日志。' }
+    if ($bridge) {
+        try { $ping = Invoke-RestMethod -Uri 'http://127.0.0.1:1994/ping' -TimeoutSec 2; if ($ping.status -ne 'ok') { throw 'bridge not ready' } }
+        catch { Write-Warning 'Figma bridge 尚未就绪；截图和 Spec 仍可使用，请检查 bridge 日志。' }
+    }
     Write-Output "Design2Code 已启动：http://${webHost}:${webPort}"
 } catch {
     foreach ($proc in $started) { if (-not $proc.HasExited) { Stop-StartedTree -ParentId $proc.Id -RootStart $proc.StartTime.ToUniversalTime() } }

@@ -31,7 +31,7 @@
    npm run build
    ```
 
-   在 Figma 桌面版通过插件开发菜单导入 `figma-mcp-bridge\plugin\manifest.json`，打开要使用的设计文件并运行 **Figma MCP Bridge** 插件。插件显示 WebSocket Connected 后才能导入节点；文件绑定及排查步骤见下文“Figma MCP Bridge”。只用截图或 Spec 时不需要运行 Figma 插件；如果 `.env` 设为 `mcp`，启动脚本仍需 Bridge server 已构建。
+   在 Figma 桌面版通过插件开发菜单导入 `figma-mcp-bridge\plugin\manifest.json`，打开要使用的设计文件并运行 **Figma MCP Bridge** 插件。插件显示 WebSocket Connected 后才能导入节点；文件绑定及排查步骤见下文“Figma MCP Bridge”。只用截图或 Spec 时不需要运行 Figma 插件；Bridge 未构建或不可用时，启动脚本会提示，工作台仍可启动。需要使用 Figma 时再构建并连接 Bridge。
 
 3. 在项目根目录的 `.env` 填写配置。第一次创建时可把下面的字段复制到 **`.env`**，再填写自己的地址和 key；已经填写过时直接保留原文件：
 
@@ -443,3 +443,6 @@ bridge 健康检查成功只表示服务已启动；读取设计还需要目标 
 
 
 2026-11-10：人工复核面板读取时增加候选版本核对；版本不一致返回 409，提示刷新后复核。接口测试覆盖版本一致及变化，尚未复现真实浏览器并发切换；后端 341 项测试通过、Pyright 0 错误和 52 项已有警告；前端构建与工作台文件 ESLint 通过，全项目 lint 仍有 19 个已有错误。未调用模型；运行中的后端重启后启用。
+
+
+2026-11-10：启动脚本将 Figma Bridge 作为可选组件；未构建、端口被占用或 Bridge 启动失败时提示，继续尝试启动截图和 Spec 所需的前后端。隔离 PowerShell 模拟环境覆盖未构建和端口不可用分支；这些模拟不证明真实故障下完整运行。本机确认无运行中任务后用脚本重启，前端 HTTP 200，Figma 连接状态 connected；未调用模型。
