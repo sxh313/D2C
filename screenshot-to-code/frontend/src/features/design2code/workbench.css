@@ -219,3 +219,5 @@
 .d2c-image-item .d2c-thumb img { object-fit: contain; }
 .d2c-image-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #304c5a; }
 .d2c-image-size { font-size: 11px; color: #536d7c; }
+
+.d2c-draft-status { color: #536d7c; font-size: 12px; margin: 0 0 8px; }

@@ -293,6 +293,7 @@ export default function D2CWorkbench() {
   const [draggingImage, setDraggingImage] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
   const [draftError, setDraftError] = useState("");
+  const [draftSaveState, setDraftSaveState] = useState<"saving" | "saved">("saving");
   const [draftStorageAvailable, setDraftStorageAvailable] = useState(true);
   const draftWrites = useRef<Promise<void>>(Promise.resolve());
   const imagesRef = useRef<ImageInput[]>([]);
@@ -323,12 +324,16 @@ export default function D2CWorkbench() {
 
   useEffect(() => {
     if (!draftReady || !draftStorageAvailable) return;
+    let active = true;
+    setDraftSaveState("saving");
     const draft: Draft = { images, spec, figma, bundle, instruction, authority, searchRule, dialogRule, tabRule };
     const timer = window.setTimeout(() => {
       draftWrites.current = draftWrites.current.catch(() => {}).then(() => writeDraft(draft));
-      void draftWrites.current.then(() => setDraftError("")).catch(() => setDraftError("草稿保存失败，请检查浏览器存储空间。"));
+      void draftWrites.current.then(() => {
+        if (active) { setDraftError(""); setDraftSaveState("saved"); }
+      }).catch(() => { if (active) setDraftError("草稿保存失败，请检查浏览器存储空间。"); });
     }, 300);
-    return () => window.clearTimeout(timer);
+    return () => { active = false; window.clearTimeout(timer); };
   }, [draftReady, draftStorageAvailable, images, spec, figma, bundle, instruction, authority, searchRule, dialogRule, tabRule]);
 
   const addImages = useCallback(async (files: File[]) => {
@@ -696,6 +701,7 @@ export default function D2CWorkbench() {
     <main className="d2c-main"><div className="d2c-intro"><div><div className="d2c-eyebrow">DESIGN MATERIALS → WORKING PAGE</div><h1>把设计，变成可以运行的页面。</h1><p>组合截图、需求和 Figma，告诉我们各自该参考什么。</p></div><div className="d2c-intro-note"><span>输出</span><strong>React + TypeScript</strong></div></div>
       <div className="d2c-grid"><section className="d2c-card d2c-inputs">{draftError && <div className="d2c-error" role="alert">{draftError}</div>}<div className="d2c-section-heading"><div><span className="d2c-step">第一步 · 准备资料</span><h2>设计资料</h2></div><span className="d2c-count">{images.length + Number(!!spec.trim()) + Number(!!figma.trim()) + Number(!!bundle)} 份资料</span></div>
         <p className="d2c-input-guide">添加至少一种资料；可组合截图、Spec、Figma 和项目包。</p>
+        <p className="d2c-draft-status" role="status">{draftError ? "草稿未保存" : imageReads > 0 ? "图片读取中" : draftSaveState === "saving" ? "草稿保存中…" : "草稿已保存到当前浏览器"}</p>
         <label className="d2c-label">截图 <span>已添加 {images.length} / 3 张</span></label>
         <div className={`d2c-drop ${draggingImage ? "is-dragging" : ""}`} onDragOver={(event) => { event.preventDefault(); if (Array.from(event.dataTransfer.types).includes("Files")) setDraggingImage(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDraggingImage(false); }} onDrop={(event) => { event.preventDefault(); setDraggingImage(false); void addImages(Array.from(event.dataTransfer.files)); }}>
           <input ref={fileRef} type="file" accept="image/png,image/jpeg" multiple hidden onChange={(event) => { void addImages(Array.from(event.target.files || [])); event.target.value = ""; }} />
