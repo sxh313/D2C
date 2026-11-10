@@ -12,7 +12,7 @@ import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 
 from design2code.settings import Settings, get_settings
 from design2code.storage import connect, get_input, get_source_set
@@ -27,7 +27,7 @@ _build_processes: dict[str, subprocess.Popen[str]] = {}
 
 class PreviewHandler(SimpleHTTPRequestHandler):
     def _select_candidate(self) -> bool:
-        path = unquote(urlsplit(self.path).path)
+        path = urlsplit(self.path).path
         match = re.fullmatch(r"/(run_[a-zA-Z0-9_-]+)/(candidate(?:-2)?)(/.*)?", path)
         if not match:
             self.send_error(404)

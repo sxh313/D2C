@@ -2,6 +2,7 @@
 
 import json
 from typing import Any, cast
+from urllib.parse import quote
 
 import httpx
 
@@ -51,7 +52,7 @@ def _materials(source_set: dict[str, Any]) -> tuple[str, list[str]]:
         elif item["input_type"] == "figma_bundle":
             summary["format"] = data["format"]
             summary["reference_files"] = data["files"]
-            summary["available_assets"] = [f"./{asset['path']}" for asset in data["assets"]]
+            summary["available_assets"] = ["./" + quote(asset["path"], safe="/") for asset in data["assets"]]
             summary["note"] = ("Reference source only; do not run or copy package scripts. "
                                "Available image paths are relative to the page and work in JSX img src or inline styles. "
                                "Do not put those ./images paths directly in CSS files: built CSS is served from assets/. "
