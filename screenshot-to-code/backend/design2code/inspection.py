@@ -24,6 +24,7 @@ async def _watch_resources(page: Any, url: str, problems: set[str]) -> None:
 
 async def inspect_search(run_id: str, candidate: str, rule: dict[str, str]) -> dict[str, Any]:
     """Verify the user's declared two-example search behavior, not arbitrary semantics."""
+    stage = "加载页面"
     try:
         url = preview_url(run_id, get_settings(), candidate)
         async with async_playwright() as playwright:
@@ -42,14 +43,21 @@ async def inspect_search(run_id: str, candidate: str, rule: dict[str, str]) -> d
                 field = page.get_by_placeholder(rule["placeholder"], exact=True)
                 shown = page.get_by_text(rule["visible_text"], exact=True)
                 hidden = page.get_by_text(rule["hidden_text"], exact=True)
+                stage = "查找唯一搜索框"
                 await expect(field).to_have_count(1, timeout=3000)
+                stage = "查找初始保留示例"
                 await expect(shown).to_have_count(1, timeout=3000)
+                stage = "查找初始隐藏示例"
                 await expect(hidden).to_have_count(1, timeout=3000)
+                stage = "检查初始显示状态"
                 await expect(field).to_be_visible(timeout=3000)
                 await expect(shown).to_be_visible(timeout=3000)
                 await expect(hidden).to_be_visible(timeout=3000)
+                stage = "输入搜索词"
                 await field.fill(rule["query"], timeout=3000)
+                stage = "检查搜索后保留示例"
                 await expect(shown).to_be_visible(timeout=3000)
+                stage = "检查搜索后隐藏示例"
                 await expect(hidden).to_be_hidden(timeout=3000)
                 if errors:
                     return {"id": "spec_search_01", "status": "FAIL", "message": "搜索验收发现页面或资源错误。"}
@@ -57,7 +65,7 @@ async def inspect_search(run_id: str, candidate: str, rule: dict[str, str]) -> d
             finally:
                 await browser.close()
     except (PlaywrightTimeoutError, AssertionError):
-        return {"id": "spec_search_01", "status": "FAIL", "message": "搜索验收失败：输入框或示例的显示状态不符合预先填写的规则。"}
+        return {"id": "spec_search_01", "status": "FAIL", "message": f"搜索验收失败：{stage}未符合规则。请检查输入框提示文字、示例是否唯一及搜索后的显示状态。"}
     except Exception:
         return {"id": "spec_search_01", "status": "NOT_RUN", "message": "搜索验收未能运行；请检查本机浏览器和预览。"}
 

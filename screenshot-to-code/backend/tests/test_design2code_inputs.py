@@ -670,6 +670,10 @@ async def test_declared_search_verifies_actual_filter(tmp_path: Path, monkeypatc
         rule = {"placeholder": "搜索", "query": "邮件", "visible_text": "查看邮件", "hidden_text": "整理文件"}
         result = await inspection.inspect_search("run_search", "candidate", rule)
         assert result["status"] == ("PASS" if works else "FAIL"), result
+        if not works:
+            assert "检查搜索后隐藏示例" in result["message"]
+        missing = await inspection.inspect_search("run_search", "candidate", {**rule, "placeholder": "不存在"})
+        assert missing["status"] == "FAIL" and "查找唯一搜索框" in missing["message"]
     finally:
         runner.close_previews()
 
