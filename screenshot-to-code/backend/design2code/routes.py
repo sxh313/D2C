@@ -283,6 +283,7 @@ async def visual_diff(run_id: str, input_id: str, viewport: Literal["desktop", "
             captured = await capture_reference_viewport(run_id, candidate, width, height)
             result = await asyncio.to_thread(_pixel_difference, reference, io.BytesIO(captured))
             result["capture"] = "reference_viewport"
+            result["candidate_image_data_url"] = "data:image/png;base64," + base64.b64encode(captured).decode("ascii")
             return result
         except HTTPException:
             raise

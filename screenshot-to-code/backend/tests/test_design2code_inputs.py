@@ -79,6 +79,7 @@ async def test_visual_diff_reference_viewport_capture(tmp_path: Path, monkeypatc
     monkeypatch.setattr(d2c_routes, "capture_reference_viewport", capture)
     result = await d2c_routes.visual_diff("run_test", "reference", "reference")
     assert result["capture"] == "reference_viewport" and result["mean_channel_difference"] == 0
+    assert base64.b64decode(result["candidate_image_data_url"].split(",", 1)[1]) == image.getvalue()
 
 
 def test_main_app_only_exposes_tracked_model_generation() -> None:
