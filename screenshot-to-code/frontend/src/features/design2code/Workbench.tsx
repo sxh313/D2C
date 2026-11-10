@@ -4,7 +4,7 @@ import { buildSelectedElementInstruction } from "../../components/select-and-edi
 import "./workbench.css";
 
 type ImageInput = { name: string; data: string };
-type Capabilities = { provider_configured: boolean; figma_mode: "mcp" | "rest"; figma_configured: boolean; generation_available: boolean; configuration_issues: string[] };
+type Capabilities = { provider_configured: boolean; figma_mode: "mcp" | "rest"; figma_configured: boolean; generation_available: boolean; configuration_issues: string[]; token_limit_configured: boolean; cost_limit_configured: boolean };
 type SourceSet = { source_set_id: string; source_set_revision: number; source_set_hash: string };
 type Run = { run_id: string; status: string; error: string | null; model_requests: number; repairs: number; result: { candidate_name?: string; files: { path: string; content: string }[]; checks?: { id: string; status: string; message: string }[]; build_details?: string } | null };
 type Dimension = "layout" | "style" | "content" | "behavior";
@@ -115,6 +115,7 @@ export default function D2CWorkbench() {
   const [instruction, setInstruction] = useState("");
   const [authority, setAuthority] = useState<Record<Dimension, string>>({ layout: "", style: "", content: "", behavior: "" });
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
+  const [connectionError, setConnectionError] = useState("");
   const [run, setRun] = useState<Run | null>(null);
   const [restoreId, setRestoreId] = useState("");
   const [restoreError, setRestoreError] = useState("");
@@ -181,11 +182,20 @@ export default function D2CWorkbench() {
     return () => document.removeEventListener("paste", handlePaste);
   }, [addImages]);
 
+  const refreshCapabilities = useCallback(async () => {
+    try {
+      setCapabilities(await request<Capabilities>("/capabilities"));
+      setConnectionError("");
+    } catch {
+      setCapabilities(null);
+      setConnectionError("无法连接后端，请确认工作台服务已启动后重新检查。");
+    }
+  }, []);
   useEffect(() => {
-    request<Capabilities>("/capabilities").then(setCapabilities).catch(() => setError("无法连接后端，请检查本地服务是否启动。"));
+    void refreshCapabilities();
     const lastRun = window.localStorage.getItem("d2c_last_run");
     if (lastRun) request<Run>(`/runs/${lastRun}`).then(setRun).catch(() => setError("暂时无法恢复上次任务，请确认后端运行后刷新。"));
-  }, []);
+  }, [refreshCapabilities]);
 
   useEffect(() => {
     if (!run || !["CREATED", "GENERATING", "BUILDING", "REPAIRING"].includes(run.status)) return;
@@ -347,7 +357,13 @@ export default function D2CWorkbench() {
         {error && <div className="d2c-error" role="alert">{error}</div>}
         <button className="d2c-generate" disabled={isRunning || !capabilities?.generation_available} onClick={() => void handleGenerate()}>{isRunning ? <><LuRefreshCw className="d2c-spin" /> 正在处理</> : <>确认资料并生成 <LuArrowUpRight /></>}</button>
         {run && ["CREATED", "GENERATING", "BUILDING", "REPAIRING"].includes(run.status) && <button type="button" disabled={busy} onClick={() => void handleStop()}>停止当前任务</button>}
-        {!capabilities?.generation_available && <p className="d2c-help">生成暂不可用，请检查后端服务、根目录 .env 配置及 pnpm 安装。</p>}
+        {!capabilities?.generation_available && <div className="d2c-help" role="status">
+          <p>{connectionError || (!capabilities ? "正在检查本机服务…" : "生成暂不可用，请检查以下配置和依赖。")}</p>
+          {!!capabilities?.configuration_issues.length && <ul>{capabilities.configuration_issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>}
+          {capabilities && (capabilities.token_limit_configured || capabilities.cost_limit_configured) && <p>当前版本不执行预算上限，请将根目录 .env 中的 D2C_TOKEN_LIMIT 和 D2C_COST_LIMIT_MICRO_USD 留空后重启服务。</p>}
+          {capabilities && !capabilities.configuration_issues.length && !capabilities.token_limit_configured && !capabilities.cost_limit_configured && <p>请确认 pnpm 已安装，且工程模板的锁文件存在。</p>}
+          <button type="button" onClick={() => void refreshCapabilities()}>重新检查服务</button>
+        </div>}
       </section><section className="d2c-card d2c-result"><div className="d2c-section-heading"><div><span className="d2c-step">OUTPUT</span><h2>生成结果</h2></div><span className="d2c-status"><span className="d2c-dot ready" />{run ? statusText[run.status] || run.status : "等待开始"}</span></div>
         <details><summary>按任务 ID 恢复</summary><label className="d2c-label" htmlFor="d2c-restore">完整任务 ID</label><input id="d2c-restore" value={restoreId} onChange={(event) => { setRestoreId(event.target.value); setRestoreError(""); }} placeholder="run_…" aria-invalid={!!restoreError} aria-describedby={restoreError ? "d2c-restore-error" : undefined} /><button type="button" disabled={isRunning || !restoreId.trim()} onClick={() => void handleRestore()}>恢复任务</button>{restoreError && <div id="d2c-restore-error" className="d2c-error" role="alert">{restoreError}</div>}</details>
         {!run && <div className="d2c-empty"><div className="d2c-paper"><LuFileCode /><span>YOUR PAGE</span><i /><i /><i /></div><strong>你的页面会显示在这里</strong><p>先添加资料，再填写本次生成要求。</p><div><LuPlus /> 截图 <LuPlus /> Spec <LuPlus /> Figma</div></div>}
