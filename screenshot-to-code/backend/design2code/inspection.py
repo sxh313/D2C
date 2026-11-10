@@ -42,8 +42,9 @@ async def inspect_search(run_id: str, candidate: str, rule: dict[str, str]) -> d
                 field = page.get_by_placeholder(rule["placeholder"], exact=True)
                 shown = page.get_by_text(rule["visible_text"], exact=True)
                 hidden = page.get_by_text(rule["hidden_text"], exact=True)
-                if await field.count() != 1 or await shown.count() != 1 or await hidden.count() != 1:
-                    return {"id": "spec_search_01", "status": "FAIL", "message": "搜索验收失败：输入框或初始两条示例文本不存在或不唯一。"}
+                await expect(field).to_have_count(1, timeout=3000)
+                await expect(shown).to_have_count(1, timeout=3000)
+                await expect(hidden).to_have_count(1, timeout=3000)
                 await expect(field).to_be_visible(timeout=3000)
                 await expect(shown).to_be_visible(timeout=3000)
                 await expect(hidden).to_be_visible(timeout=3000)

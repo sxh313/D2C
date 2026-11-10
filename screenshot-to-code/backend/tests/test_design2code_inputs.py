@@ -636,6 +636,26 @@ async def test_preview_selection_intercepts_click_without_changing_exported_html
 
 
 @pytest.mark.asyncio
+async def test_declared_search_waits_for_delayed_content(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    settings: Any = SimpleNamespace(runtime_dir=tmp_path, preview_host="127.0.0.1", preview_port_start=0, preview_port_end=0)
+    monkeypatch.setattr(runner, "get_settings", lambda: settings)
+    monkeypatch.setattr(inspection, "get_settings", lambda: settings)
+    runner.close_previews()
+    dist = tmp_path / "runs" / "run_delayed" / "candidate" / "dist"
+    dist.mkdir(parents=True)
+    (dist / "index.html").write_text('<link rel="icon" href="data:,"><main></main><script src="./app.js"></script>', encoding="utf-8")
+    (dist / "app.js").write_text("""setTimeout(() => {
+        document.querySelector('main').innerHTML = '<input placeholder="Search"><div>Mail</div><div id="other">Files</div>';
+        document.querySelector('input').addEventListener('input', e => { document.querySelector('#other').hidden = !!e.target.value; });
+    }, 500);""", encoding="utf-8")
+    try:
+        result = await inspection.inspect_search("run_delayed", "candidate", {"placeholder": "Search", "query": "Mail", "visible_text": "Mail", "hidden_text": "Files"})
+        assert result["status"] == "PASS", result
+    finally:
+        runner.close_previews()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("works", [True, False])
 async def test_declared_search_verifies_actual_filter(tmp_path: Path, monkeypatch: MonkeyPatch, works: bool) -> None:
     settings: Any = SimpleNamespace(runtime_dir=tmp_path, preview_host="127.0.0.1", preview_port_start=0, preview_port_end=0)
