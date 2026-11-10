@@ -65,6 +65,7 @@ async def inspect_candidate(run_id: str, candidate: str) -> dict[str, Any]:
             try:
                 observations: list[str] = []
                 failed = False
+                screenshots = 0
                 for name, width, height in (("desktop", 1440, 900), ("tablet", 768, 1024), ("mobile", 390, 844)):
                     page = await browser.new_page(viewport={"width": width, "height": height})
                     page_errors: list[str] = []
@@ -73,7 +74,9 @@ async def inspect_candidate(run_id: str, candidate: str) -> dict[str, Any]:
                     page.on("console", lambda message: page_errors.append(message.text) if message.type == "error" else None)
                     await _watch_resources(page, url, resource_errors)
                     response = await page.goto(url, wait_until="load", timeout=15000)
-                    if response is None or not response.ok:
+                    if response is None:
+                        raise RuntimeError("Preview did not return a response")
+                    if not response.ok:
                         observations.append(f"{name}: 预览页面返回错误状态")
                         failed = True
                         await page.close()
@@ -81,10 +84,11 @@ async def inspect_candidate(run_id: str, candidate: str) -> dict[str, Any]:
                     overflow = await page.evaluate("() => document.documentElement.scrollWidth > window.innerWidth + 1")
                     target = settings.runtime_dir / "runs" / run_id / candidate / f"inspection-{name}.png"
                     await page.screenshot(path=str(target), full_page=True, timeout=15000)
+                    screenshots += 1
                     observations.append(f"{name}: {'水平溢出' if overflow else '无水平溢出'}" + ("，页面脚本或资源报错" if page_errors else "") + ("，" + "、".join(sorted(resource_errors)) if resource_errors else ""))
                     failed = failed or bool(overflow) or bool(page_errors) or bool(resource_errors)
                     await page.close()
-                return {"id": "viewport", "status": "FAIL" if failed else "PASS", "message": "；".join(observations) + "。已保存截图；视觉还原和功能仍需人工检查。"}
+                return {"id": "viewport", "status": "FAIL" if failed else "PASS", "message": "；".join(observations) + f"。已保存 {screenshots} 张视口截图；视觉还原和功能仍需人工检查。"}
             finally:
                 await browser.close()
     except Exception:
@@ -106,7 +110,9 @@ async def inspect_interactions(run_id: str, candidate: str) -> dict[str, Any]:
                 page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
                 await _watch_resources(page, url, resource_errors)
                 response = await page.goto(url, wait_until="load", timeout=15000)
-                if response is None or not response.ok:
+                if response is None:
+                    raise RuntimeError("Preview did not return a response")
+                if not response.ok:
                     return {"id": "interaction_smoke", "status": "FAIL", "message": "预览页面返回错误状态，无法执行交互冒烟检查。"}
                 controls = await page.locator("button, input, select, textarea").count()
                 exercised = 0
@@ -116,7 +122,9 @@ async def inspect_interactions(run_id: str, candidate: str) -> dict[str, Any]:
                     # from an earlier action must not hide subsequent controls.
                     if index:
                         response = await page.goto(url, wait_until="load", timeout=15000)
-                        if response is None or not response.ok:
+                        if response is None:
+                            raise RuntimeError("Preview did not return a response")
+                        if not response.ok:
                             return {"id": "interaction_smoke", "status": "FAIL", "message": "预览页面返回错误状态，交互冒烟检查中断。"}
                     locator = page.locator("button, input, select, textarea").nth(index)
                     try:

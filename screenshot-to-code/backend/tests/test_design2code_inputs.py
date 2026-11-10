@@ -561,6 +561,25 @@ async def test_preview_selection_intercepts_click_without_changing_exported_html
 
 
 @pytest.mark.asyncio
+async def test_missing_preview_page_fails_without_claiming_screenshots(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    settings: Any = SimpleNamespace(runtime_dir=tmp_path, preview_host="127.0.0.1", preview_port_start=0, preview_port_end=0)
+    monkeypatch.setattr(runner, "get_settings", lambda: settings)
+    monkeypatch.setattr(inspection, "get_settings", lambda: settings)
+    runner.close_previews()
+    dist = tmp_path / "runs" / "run_missing" / "candidate" / "dist"
+    dist.mkdir(parents=True)
+    (dist / "index.html").write_text("<p>Preview</p>", encoding="utf-8")
+    monkeypatch.setattr(runner.PreviewHandler, "do_GET", lambda self: self.send_error(404))
+    try:
+        viewport = await inspection.inspect_candidate("run_missing", "candidate")
+        interaction = await inspection.inspect_interactions("run_missing", "candidate")
+        assert viewport["status"] == "FAIL" and "已保存 0 张" in viewport["message"], viewport
+        assert interaction["status"] == "FAIL" and "错误状态" in interaction["message"], interaction
+    finally:
+        runner.close_previews()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("resource", ["missing.json", "https://example.invalid/data.json"])
 async def test_inspection_reports_resource_failures(tmp_path: Path, monkeypatch: MonkeyPatch, resource: str) -> None:
     settings: Any = SimpleNamespace(runtime_dir=tmp_path, preview_host="127.0.0.1", preview_port_start=0, preview_port_end=0)
