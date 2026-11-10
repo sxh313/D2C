@@ -72,6 +72,21 @@ function readFile(file: File): Promise<ImageInput> {
   });
 }
 
+async function readScreenshot(file: File): Promise<ImageInput> {
+  const input = await readFile(file);
+  await new Promise<void>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      if (!image.naturalWidth || !image.naturalHeight || image.naturalWidth * image.naturalHeight > 40_000_000) {
+        reject(new Error("图片尺寸不受支持"));
+      } else resolve();
+    };
+    image.onerror = () => reject(new Error("图片无法解码"));
+    image.src = input.data;
+  });
+  return input;
+}
+
 const statusText: Record<string, string> = {
   CREATED: "正在准备", GENERATING: "正在生成代码", GENERATED: "代码已生成，等待构建",
   BUILDING: "正在构建", REPAIRING: "正在修改", READY_FOR_REVIEW: "等待查看", COMPLETE_LOCAL: "已完成",
@@ -213,13 +228,17 @@ export default function D2CWorkbench() {
     setImageError("");
     setImageReads((count) => count + 1);
     const valid = files.filter((file) => ["image/png", "image/jpeg"].includes(file.type) && file.size <= 10 * 1024 * 1024);
-    if (valid.length !== files.length) setImageError("请选择不超过 10 MiB 的 PNG 或 JPEG 图片。");
     try {
-      const incoming = await Promise.all(valid.map(readFile));
+      const results = await Promise.allSettled(valid.map(readScreenshot));
+      const incoming = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
       const combined = [...imagesRef.current, ...incoming];
       imagesRef.current = combined.slice(0, 3);
       setImages(imagesRef.current);
-      if (combined.length > 3) setImageError("一个页面最多添加 3 张截图。");
+      const messages: string[] = [];
+      if (valid.length !== files.length) messages.push("请选择不超过 10 MiB 的 PNG 或 JPEG 图片。");
+      if (results.some((result) => result.status === "rejected")) messages.push("部分图片无法读取或超过 4000 万像素，请更换图片。");
+      if (combined.length > 3) messages.push("一个页面最多添加 3 张截图。");
+      if (messages.length) setImageError(messages.join(" "));
     } catch { setImageError("无法读取图片，请重新选择。"); }
     finally { setImageReads((count) => count - 1); }
   }, []);
