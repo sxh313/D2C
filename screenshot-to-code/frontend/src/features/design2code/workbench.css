@@ -221,3 +221,33 @@
 .d2c-image-size { font-size: 11px; color: #536d7c; }
 
 .d2c-draft-status { color: #536d7c; font-size: 12px; margin: 0 0 8px; }
+
+/* 以资料准备和页面预览为主的工作区 */
+.d2c-shell { color: #203c4c; background: #eaf1f3; font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif; }
+.d2c-header { background: #133a4a; border-color: #133a4a; color: #fff; }
+.d2c-brand-mark { background: #83d4c5; color: #123e4c; border-radius: 9px; }
+.d2c-brand small, .d2c-header-right { color: #c6dedf; }
+.d2c-local { border-color: #527884; color: #e3f3f0; }
+.d2c-main { max-width: 1540px; }
+.d2c-intro { align-items: center; padding: 4px 0 20px; border-bottom: 1px solid #c7d9dc; }
+.d2c-eyebrow, .d2c-step { font-family: "Microsoft YaHei UI", sans-serif; letter-spacing: .06em; color: #367b7c; }
+.d2c-intro h1 { letter-spacing: -.02em; }
+.d2c-grid { grid-template-columns: minmax(340px, 430px) minmax(0, 1fr); gap: 22px; align-items: start; }
+.d2c-card { border-color: #cfdee1; border-radius: 14px; box-shadow: 0 12px 32px #193e4d0d; }
+.d2c-section-heading { padding-bottom: 16px; border-bottom: 1px solid #e1ebec; }
+.d2c-section-heading h2 { color: #173d4d; font-size: 20px; }
+.d2c-input-guide { margin-top: 0; }
+.d2c-drop { background: #eff9f7; border: 1px dashed #73aeb0; }
+.d2c-drop-icon { color: #277c7c; }
+.d2c-inputs > details { margin-top: 10px; padding: 12px; border: 1px solid #e0ebec; border-radius: 8px; background: #f8fbfb; }
+.d2c-inputs > details summary { font-size: 13px; font-weight: 600; line-height: 1.5; }
+.d2c-inputs > details .d2c-label { display: grid; gap: 6px; }
+.d2c-material-summary { padding: 12px 14px; background: #f1f8f7; border-radius: 0 8px 8px 0; color: #486771; }
+.d2c-generate { background: #176e70; }
+.d2c-result { min-width: 0; }
+.d2c-result > details { background: #f7fafb; border: 1px solid #e0ebec; border-radius: 8px; padding: 11px 13px; margin-bottom: 8px; }
+.d2c-preview { height: clamp(460px, 65vh, 760px); }
+.d2c-empty { min-height: 430px; background: #f7fbfa; }
+.d2c-footer { font-family: "Microsoft YaHei UI", sans-serif; letter-spacing: 0; }
+@media (max-width: 850px) { .d2c-grid { grid-template-columns: minmax(0, 1fr); } .d2c-empty { min-height: 300px; } }
+@media (max-width: 520px) { .d2c-intro { align-items: start; } .d2c-intro h1 { font-size: 26px; } .d2c-inputs, .d2c-result { padding: 18px; } .d2c-preview { height: 460px; } .d2c-header-right { font-size: 11px; } }
