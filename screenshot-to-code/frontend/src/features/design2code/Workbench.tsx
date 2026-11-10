@@ -708,6 +708,8 @@ export default function D2CWorkbench() {
     try {
       await request("/runs/delete-history", jsonPost({ run_ids: ids }));
       setRecentRuns((current) => current?.filter((item) => !ids.includes(item.run_id)) || null);
+      try { setRecentRuns((await request<{ runs: RecentRun[] }>("/runs?limit=20")).runs); }
+      catch { setRecentError("记录已删除，但列表刷新失败；请重新读取最近任务。"); }
       if (run && ids.includes(run.run_id)) {
         setRun(null); setPreview(""); setRepairInstruction("");
         try { if (window.localStorage.getItem("d2c_last_run") === run.run_id) window.localStorage.removeItem("d2c_last_run"); }
