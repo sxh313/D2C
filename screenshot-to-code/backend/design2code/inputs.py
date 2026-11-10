@@ -265,6 +265,9 @@ def _mcp_error(result: Any) -> str | None:
     return "MCP 工具返回错误"
 
 
+FIGMA_MCP_TIMEOUT_SECONDS = 90
+
+
 async def import_figma_mcp(url: str) -> dict[str, Any]:
     settings = get_settings()
     if not hasattr(settings, "figma_bridge_client") and getattr(settings, "figma_token", ""):
@@ -285,9 +288,22 @@ async def import_figma_mcp(url: str) -> dict[str, Any]:
             node, str(node_script), file_key, node_id, session_key,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=90)
-    except (OSError, asyncio.TimeoutError) as exc:
-        raise HTTPException(504, "Figma MCP Bridge 请求超时或无法启动。") from exc
+    except OSError as exc:
+        raise HTTPException(503, "Figma MCP Bridge 无法启动，请检查 Node.js 和 bridge。") from exc
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=FIGMA_MCP_TIMEOUT_SECONDS)
+    except (asyncio.TimeoutError, asyncio.CancelledError) as exc:
+        # Closing the client also closes its stdio connection; the bridge server
+        # it spawned exits on stdin EOF. The persistent workbench bridge is separate.
+        try:
+            if process.returncode is None:
+                process.kill()
+        except ProcessLookupError:
+            pass
+        await process.communicate()
+        if isinstance(exc, asyncio.CancelledError):
+            raise
+        raise HTTPException(504, "Figma MCP Bridge 请求超时，请检查 Figma 插件连接。") from exc
     if process.returncode != 0:
         detail = stderr.decode("utf-8", errors="replace")[-1000:]
         raise HTTPException(422, f"Figma MCP Bridge 未返回节点；请在 Figma Desktop 中打开 bridge 插件。{detail}")

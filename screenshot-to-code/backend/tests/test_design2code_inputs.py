@@ -5,6 +5,7 @@ import asyncio
 import io
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -135,6 +136,30 @@ async def test_figma_mcp_import_reports_bridge_tool_error(tmp_path: Path, monkey
     (tmp_path / "bridge-client.mjs").write_text("", encoding="utf-8")
     with pytest.raises(HTTPException, match="No plugin connected"):
         await inputs.import_figma_mcp("https://www.figma.com/design/Abc123/test?node-id=1-2")
+
+
+@pytest.mark.asyncio
+async def test_figma_mcp_timeout_terminates_owned_client(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is not installed")
+    script = tmp_path / "bridge-client.mjs"
+    script.write_text("setInterval(() => {}, 1000);", encoding="utf-8")
+    monkeypatch.setattr(inputs, "get_settings", lambda: SimpleNamespace(figma_mode="mcp", figma_bridge_client=script))
+    monkeypatch.setattr(inputs, "FIGMA_MCP_TIMEOUT_SECONDS", 0.5)
+    real_exec = inputs.asyncio.create_subprocess_exec
+    started: list[Any] = []
+
+    async def capture_exec(*args: Any, **kwargs: Any) -> Any:
+        process = await real_exec(*args, **kwargs)
+        started.append(process)
+        return process
+
+    monkeypatch.setattr(inputs.asyncio, "create_subprocess_exec", capture_exec)
+    with pytest.raises(HTTPException) as error:
+        await inputs.import_figma_mcp("https://www.figma.com/design/Abc123/test?node-id=1-2")
+    assert error.value.status_code == 504
+    assert len(started) == 1 and started[0].returncode is not None
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows process-tree integration test")

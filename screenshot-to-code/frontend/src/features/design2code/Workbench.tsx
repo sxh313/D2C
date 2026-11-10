@@ -4,11 +4,48 @@ import { buildSelectedElementInstruction } from "../../components/select-and-edi
 import "./workbench.css";
 
 type ImageInput = { name: string; data: string };
-type Capabilities = { provider_configured: boolean; figma_configured: boolean; generation_available: boolean; configuration_issues: string[] };
+type Capabilities = { provider_configured: boolean; figma_mode: "mcp" | "rest"; figma_configured: boolean; generation_available: boolean; configuration_issues: string[] };
 type SourceSet = { source_set_id: string; source_set_revision: number; source_set_hash: string };
 type Run = { run_id: string; status: string; error: string | null; model_requests: number; repairs: number; result: { candidate_name?: string; files: { path: string; content: string }[]; checks?: { id: string; status: string; message: string }[]; build_details?: string } | null };
 type Dimension = "layout" | "style" | "content" | "behavior";
 type SelectedElement = { html: string; context: string; label: string };
+
+
+type Draft = { images: ImageInput[]; spec: string; figma: string; bundle: ImageInput | null; instruction: string; authority: Record<Dimension, string> };
+
+function openDraftDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("design2code-workbench", 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("drafts");
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+  });
+}
+
+async function readDraft(): Promise<Draft | undefined> {
+  const db = await openDraftDatabase();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction("drafts", "readonly");
+      const request = tx.objectStore("drafts").get("current");
+      request.onsuccess = () => resolve(request.result as Draft | undefined);
+      request.onerror = () => reject(request.error);
+    });
+  } finally { db.close(); }
+}
+
+async function writeDraft(draft: Draft): Promise<void> {
+  const db = await openDraftDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction("drafts", "readwrite");
+      tx.objectStore("drafts").put(draft, "current");
+      tx.oncomplete = () => resolve();
+      tx.onabort = () => reject(tx.error);
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally { db.close(); }
+}
 
 const api = "/api/d2c/v1";
 
@@ -59,9 +96,38 @@ export default function D2CWorkbench() {
   const [selecting, setSelecting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftError, setDraftError] = useState("");
+  const [draftStorageAvailable, setDraftStorageAvailable] = useState(true);
+  const draftWrites = useRef<Promise<void>>(Promise.resolve());
   const fileRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<HTMLIFrameElement>(null);
   const selectionToken = useRef("");
+
+  useEffect(() => {
+    let active = true;
+    readDraft().then((draft) => {
+      if (!active || !draft) return;
+      setImages(draft.images || []);
+      setSpec(draft.spec || "");
+      setFigma(draft.figma || "");
+      setBundle(draft.bundle || null);
+      setInstruction(draft.instruction || "");
+      if (draft.authority) setAuthority(draft.authority);
+    }).catch(() => { if (active) { setDraftStorageAvailable(false); setDraftError("无法读取或保存本机草稿；请检查浏览器存储设置。"); } })
+      .finally(() => { if (active) setDraftReady(true); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!draftReady || !draftStorageAvailable) return;
+    const draft: Draft = { images, spec, figma, bundle, instruction, authority };
+    const timer = window.setTimeout(() => {
+      draftWrites.current = draftWrites.current.catch(() => {}).then(() => writeDraft(draft));
+      void draftWrites.current.then(() => setDraftError("")).catch(() => setDraftError("草稿保存失败，请检查浏览器存储空间。"));
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [draftReady, draftStorageAvailable, images, spec, figma, bundle, instruction, authority]);
 
   const addImages = useCallback(async (files: File[]) => {
     setError("");
@@ -201,10 +267,11 @@ export default function D2CWorkbench() {
 
   const isRunning = busy || !!run && ["CREATED", "GENERATING", "BUILDING", "REPAIRING"].includes(run.status);
   const files = run?.result?.files || [];
+  if (!draftReady) return <main className="d2c-shell">正在恢复本机草稿…</main>;
   return <div className="d2c-shell">
     <header className="d2c-header"><div className="d2c-brand"><span className="d2c-brand-mark"><LuLayers /></span><div><strong>Design2Code</strong><small>本地设计工作台</small></div></div><div className="d2c-header-right"><span className={`d2c-dot ${capabilities?.provider_configured ? "ready" : ""}`} />{capabilities?.provider_configured ? "模型已配置" : "检查模型配置"}<span className="d2c-local">本机运行</span></div></header>
     <main className="d2c-main"><div className="d2c-intro"><div><div className="d2c-eyebrow">DESIGN MATERIALS → WORKING PAGE</div><h1>把设计，变成可以运行的页面。</h1><p>组合截图、需求和 Figma，告诉我们各自该参考什么。</p></div><div className="d2c-intro-note"><span>输出</span><strong>React + TypeScript</strong></div></div>
-      <div className="d2c-grid"><section className="d2c-card d2c-inputs"><div className="d2c-section-heading"><div><span className="d2c-step">INPUT</span><h2>设计资料</h2></div><span className="d2c-count">{images.length + Number(!!spec.trim()) + Number(!!figma.trim()) + Number(!!bundle)} 份资料</span></div>
+      <div className="d2c-grid"><section className="d2c-card d2c-inputs">{draftError && <div className="d2c-error" role="alert">{draftError}</div>}<div className="d2c-section-heading"><div><span className="d2c-step">INPUT</span><h2>设计资料</h2></div><span className="d2c-count">{images.length + Number(!!spec.trim()) + Number(!!figma.trim()) + Number(!!bundle)} 份资料</span></div>
         <label className="d2c-label">截图 <span>可添加 3 张</span></label>
         <div className="d2c-drop" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); void addImages(Array.from(event.dataTransfer.files)); }}>
           <input ref={fileRef} type="file" accept="image/png,image/jpeg" multiple hidden onChange={(event) => { void addImages(Array.from(event.target.files || [])); event.target.value = ""; }} />
@@ -212,7 +279,7 @@ export default function D2CWorkbench() {
         </div>
         {images.length > 0 && <div className="d2c-thumbnails">{images.map((image, index) => <div className="d2c-thumb" key={`${image.name}-${index}`}><img src={image.data} alt={image.name} /><button type="button" aria-label={`移除 ${image.name}`} onClick={() => setImages((old) => old.filter((_, i) => i !== index))}><LuX /></button></div>)}</div>}
         <label className="d2c-label" htmlFor="d2c-spec">需求 Spec <span>文字或 Markdown</span></label><textarea id="d2c-spec" value={spec} onChange={(event) => setSpec(event.target.value)} placeholder={'例如：任务列表支持搜索、状态筛选和新建弹窗。'} rows={4} />
-        <label className="d2c-label" htmlFor="d2c-figma">Figma 节点链接 <span>{capabilities?.figma_configured ? "已配置" : "需要配置访问令牌"}</span></label><input id="d2c-figma" value={figma} onChange={(event) => setFigma(event.target.value)} placeholder="https://www.figma.com/design/…?node-id=…" />
+        <label className="d2c-label" htmlFor="d2c-figma">Figma 节点链接 <span>{!capabilities ? "正在检查配置" : capabilities.figma_mode === "mcp" ? (capabilities.figma_configured ? "MCP 模式；请在 Figma 中运行插件" : "请先安装 MCP Bridge") : (capabilities.figma_configured ? "REST 令牌已配置" : "需要配置访问令牌")}</span></label><input id="d2c-figma" value={figma} onChange={(event) => setFigma(event.target.value)} placeholder="https://www.figma.com/design/…?node-id=…" />
         <label className="d2c-label" htmlFor="d2c-bundle">FigmaToCode 项目包 <span>可选 ZIP，最多 10 MiB</span></label>
         <input id="d2c-bundle" type="file" accept=".zip,application/zip" onChange={(event) => {
           const file = event.target.files?.[0];

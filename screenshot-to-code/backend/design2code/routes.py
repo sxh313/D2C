@@ -28,6 +28,7 @@ async def capabilities() -> dict[str, object]:
         "provider_configured": settings.model_ready,
         "model": settings.model,
         "protocol": settings.protocol,
+        "figma_mode": getattr(settings, "figma_mode", "rest"),
         "figma_configured": bool((getattr(settings, "figma_mode", "rest") == "mcp" and getattr(settings, "figma_bridge_client", None) and settings.figma_bridge_client.is_file()) or getattr(settings, "figma_token", "")),
         "token_limit_configured": settings.token_limit is not None,
         "cost_limit_configured": settings.cost_limit_micro_usd is not None,

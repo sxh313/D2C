@@ -3,16 +3,20 @@ $projectRoot = $PSScriptRoot
 $envPath = Join-Path $projectRoot '.env'
 $backendDir = Join-Path $projectRoot 'screenshot-to-code\backend'
 $frontendDir = Join-Path $projectRoot 'screenshot-to-code\frontend'
-$runtimeDir = Join-Path $projectRoot 'runtime'
-$processFile = Join-Path $runtimeDir 'workbench-processes.json'
+# Keep the process registry in a stable location even if .env changes while running.
+$processFile = Join-Path $projectRoot 'runtime\workbench-processes.json'
 
 if (-not (Test-Path -LiteralPath $envPath)) { throw '找不到根目录 .env。' }
 $settings = @{}
 foreach ($line in [System.IO.File]::ReadAllLines($envPath)) {
-    if ($line -match '^\s*(D2C_WEB_HOST|D2C_WEB_PORT|D2C_BACKEND_HOST|D2C_BACKEND_PORT|D2C_FIGMA_MODE)\s*=\s*(.*?)\s*$') {
+    if ($line -match '^\s*(D2C_WEB_HOST|D2C_WEB_PORT|D2C_BACKEND_HOST|D2C_BACKEND_PORT|D2C_FIGMA_MODE|D2C_RUNTIME_DIR)\s*=\s*(.*?)\s*$') {
         $settings[$Matches[1]] = $Matches[2].Trim('"', "'")
     }
 }
+$runtimeSetting = if ($settings.D2C_RUNTIME_DIR) { $settings.D2C_RUNTIME_DIR } else { './runtime' }
+if ($runtimeSetting -eq '~') { $runtimeSetting = $env:USERPROFILE }
+elseif ($runtimeSetting -match '^~[/\\]') { $runtimeSetting = Join-Path $env:USERPROFILE $runtimeSetting.Substring(2) }
+$runtimeDir = if ([IO.Path]::IsPathRooted($runtimeSetting)) { [IO.Path]::GetFullPath($runtimeSetting) } else { [IO.Path]::GetFullPath((Join-Path $projectRoot $runtimeSetting)) }
 $webHost = if ($settings.D2C_WEB_HOST) { $settings.D2C_WEB_HOST } else { '127.0.0.1' }
 $backendHost = if ($settings.D2C_BACKEND_HOST) { $settings.D2C_BACKEND_HOST } else { '127.0.0.1' }
 $webPort = if ($settings.D2C_WEB_PORT) { [int]$settings.D2C_WEB_PORT } else { 5173 }
@@ -41,6 +45,7 @@ $node = Get-Command node.exe -ErrorAction SilentlyContinue
 $vitePath = Join-Path $frontendDir 'node_modules\vite\bin\vite.js'
 if (-not $node -or -not (Test-Path -LiteralPath $vitePath)) { throw '未找到 Node.js 或前端依赖，请先在 frontend 运行 pnpm install。' }
 New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $processFile) | Out-Null
 function Stop-StartedTree([int]$ParentId, [datetime]$RootStart) {
     $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $ParentId" -ErrorAction SilentlyContinue)
     foreach ($child in $children) {
@@ -91,7 +96,7 @@ try {
             break
         } catch { }
     }
-    if (-not $ready) { throw '启动未完成，请检查 runtime 目录下的服务日志。' }
+    if (-not $ready) { throw '启动未完成，请检查 D2C_RUNTIME_DIR 目录下的服务日志。' }
     Write-Output "Design2Code 已启动：http://${webHost}:${webPort}"
 } catch {
     foreach ($proc in $started) { if (-not $proc.HasExited) { Stop-StartedTree -ParentId $proc.Id -RootStart $proc.StartTime.ToUniversalTime() } }
