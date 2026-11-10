@@ -267,3 +267,31 @@
 .d2c-check-results[aria-label="人工复核"] > button { justify-self: start; padding: 9px 14px; border: 1px solid #176e70; border-radius: 7px; background: #176e70; color: #fff; cursor: pointer; }
 .d2c-check-results[aria-label="人工复核"] > button:disabled { opacity: .55; cursor: not-allowed; }
 @media (max-width: 520px) { .d2c-check-results[aria-label="人工复核"] { grid-template-columns: minmax(0, 1fr); } }
+.d2c-preview-controls { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin: 9px 0; color: #526f7a; font-size: 12px; }
+.d2c-preview-controls button { padding: 7px 10px; border: 1px solid #c9dfe2; border-radius: 6px; background: #fff; color: #205f68; font: inherit; cursor: pointer; }
+
+/* 设计工作台：以输入与预览为中心。 */
+.d2c-shell { background: #f3f6fa; color: #162b3d; }
+.d2c-header { height: 64px; background: #fff; color: #182f42; border-bottom: 1px solid #e5ebf1; }
+.d2c-brand-mark { background: #274fd4; color: #fff; border-radius: 10px; }
+.d2c-brand small, .d2c-header-right { color: #667c8d; }
+.d2c-local { color: #4b6573; border-color: #dce6e9; background: #f6faf9; }
+.d2c-main { max-width: 1580px; padding-top: 26px; }
+.d2c-intro { margin-bottom: 22px; padding-bottom: 18px; }
+.d2c-intro h1 { font-size: clamp(25px, 2vw, 32px); margin: 6px 0; color: #172d41; }
+.d2c-eyebrow, .d2c-step { color: #4165bc; }
+.d2c-intro-note { border-color: #6280dd; }
+.d2c-grid { grid-template-columns: minmax(360px, 450px) minmax(0, 1fr); gap: 20px; }
+.d2c-card { border-color: #e1e8ef; box-shadow: 0 8px 30px #1b38550a; }
+.d2c-section-heading h2 { color: #172d41; }
+.d2c-drop { background: #f5f8ff; border-color: #9fb4e9; }
+.d2c-drop-icon, .d2c-drop button { color: #315bd1; }
+.d2c-generate { background: #2855d6; box-shadow: 0 6px 14px #2855d62b; }
+.d2c-generate:disabled { background: #a9b9d3; box-shadow: none; }
+.d2c-check-options > details { margin-top: 9px; padding: 10px; border: 1px solid #e0e8ed; border-radius: 7px; background: #fff; }
+.d2c-check-options > details summary { font-weight: 500; }
+.d2c-material-summary { background: #f5f8fc; border-left-color: #7191dc; }
+.d2c-empty { background: #f8fafc; }
+.d2c-result-actions a:last-child { background: #2855d6; border-color: #2855d6; }
+@media (max-width: 850px) { .d2c-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 520px) { .d2c-header { height: 62px; } .d2c-main { padding: 22px 12px 16px; } }
