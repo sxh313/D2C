@@ -381,3 +381,33 @@
   .d2c-result-actions > * { width: 100%; margin: 0 !important; text-align: center; }
 }
 @media (prefers-reduced-motion: reduce) { .d2c-shell details > summary::after { transition: none; } }
+
+/* A quieter canvas keeps the design material and generated page in focus. */
+.d2c-shell { background: #f3f6fb; color: #172b45; }
+.d2c-header { background: rgba(255, 255, 255, .96); border-color: #e4eaf2; }
+.d2c-brand-mark { background: #3159d7; box-shadow: 0 4px 10px #3159d726; }
+.d2c-main { max-width: 1540px; }
+.d2c-intro { padding: 12px 2px 24px; border-color: #dce5f0; }
+.d2c-intro h1 { color: #132b49; font-weight: 700; line-height: 1.25; }
+.d2c-intro p { color: #667b91; }
+.d2c-intro-note { border-left: 0; padding: 11px 15px; border-radius: 10px; background: #eaf0fb; color: #7183a0; }
+.d2c-intro-note strong { color: #3657ad; }
+.d2c-card { border: 1px solid #e1e8f2; border-radius: 16px; box-shadow: 0 10px 32px #213a5d0a; }
+.d2c-section-heading { border-color: #edf1f7; }
+.d2c-step { color: #5c79c4; }
+.d2c-count, .d2c-status { background: #f1f5fb; color: #5b718a; }
+.d2c-drop { border-radius: 12px; background: #f6f8ff; border-color: #b3c4ef; }
+.d2c-drop:hover, .d2c-drop:focus-within { background: #eef3ff; border-color: #7694e7; }
+.d2c-drop-icon { background: #e6edff; color: #4267d6; }
+.d2c-inputs textarea, .d2c-inputs input:not([type=file]), .d2c-inputs select { border-color: #dce5f0; border-radius: 9px; }
+.d2c-generate { border-radius: 9px; background: #3159d7; box-shadow: 0 6px 16px #3159d72b; }
+.d2c-generate:not(:disabled):hover { background: #244bc5; }
+.d2c-preview { border-color: #dce5f0; border-radius: 10px; }
+.d2c-check-results { border-color: #e1e8f2; background: #f9fbfe; border-radius: 10px; }
+.d2c-footer { color: #8495a9; }
+@media (max-width: 520px) { .d2c-intro { padding-top: 3px; } .d2c-card { border-radius: 13px; } }
+
+/* Use more of wide screens while retaining a comfortable mobile gutter. */
+.d2c-main { max-width: none; padding-left: clamp(16px, 1.5vw, 28px); padding-right: clamp(16px, 1.5vw, 28px); }
+.d2c-header { padding-left: clamp(16px, 1.5vw, 28px); padding-right: clamp(16px, 1.5vw, 28px); }
+@media (max-width: 520px) { .d2c-main { padding-left: 12px; padding-right: 12px; } }
