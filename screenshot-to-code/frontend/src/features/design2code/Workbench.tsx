@@ -426,8 +426,8 @@ export default function D2CWorkbench() {
   return <div className="d2c-shell">
     <header className="d2c-header"><div className="d2c-brand"><span className="d2c-brand-mark"><LuLayers /></span><div><strong>Design2Code</strong><small>本地设计工作台</small></div></div><div className="d2c-header-right"><span className={`d2c-dot ${capabilities?.provider_configured ? "ready" : ""}`} />{capabilities?.provider_configured ? "模型已配置" : "检查模型配置"}<span className="d2c-local">本机运行</span></div></header>
     <main className="d2c-main"><div className="d2c-intro"><div><div className="d2c-eyebrow">DESIGN MATERIALS → WORKING PAGE</div><h1>把设计，变成可以运行的页面。</h1><p>组合截图、需求和 Figma，告诉我们各自该参考什么。</p></div><div className="d2c-intro-note"><span>输出</span><strong>React + TypeScript</strong></div></div>
-      <div className="d2c-grid"><section className="d2c-card d2c-inputs">{draftError && <div className="d2c-error" role="alert">{draftError}</div>}<div className="d2c-section-heading"><div><span className="d2c-step">INPUT</span><h2>设计资料</h2></div><span className="d2c-count">{images.length + Number(!!spec.trim()) + Number(!!figma.trim()) + Number(!!bundle)} 份资料</span></div>
-        <p className="d2c-input-guide">截图、Spec 和 Figma 至少选择一种，也可以组合使用。</p>
+      <div className="d2c-grid"><section className="d2c-card d2c-inputs">{draftError && <div className="d2c-error" role="alert">{draftError}</div>}<div className="d2c-section-heading"><div><span className="d2c-step">第一步 · 准备资料</span><h2>设计资料</h2></div><span className="d2c-count">{images.length + Number(!!spec.trim()) + Number(!!figma.trim()) + Number(!!bundle)} 份资料</span></div>
+        <p className="d2c-input-guide">添加至少一种资料；可组合截图、Spec、Figma 和项目包。</p>
         <label className="d2c-label">截图 <span>可添加 3 张</span></label>
         <div className="d2c-drop" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); void addImages(Array.from(event.dataTransfer.files)); }}>
           <input ref={fileRef} type="file" accept="image/png,image/jpeg" multiple hidden onChange={(event) => { void addImages(Array.from(event.target.files || [])); event.target.value = ""; }} />
@@ -437,7 +437,7 @@ export default function D2CWorkbench() {
         <label className="d2c-label" htmlFor="d2c-spec">需求 Spec <span>文字或 Markdown</span></label><textarea id="d2c-spec" value={spec} onChange={(event) => setSpec(event.target.value)} placeholder={'例如：任务列表支持搜索、状态筛选和新建弹窗。'} rows={4} />
         <label className="d2c-label" htmlFor="d2c-figma">Figma 节点链接 <span>{!capabilities ? "正在检查配置" : capabilities.figma_mode === "mcp" ? (capabilities.figma_configured ? "MCP 模式；请在 Figma 中运行插件" : "请先安装 MCP Bridge") : (capabilities.figma_configured ? "REST 令牌已配置" : "需要配置访问令牌")}</span></label><input id="d2c-figma" value={figma} onChange={(event) => setFigma(event.target.value)} placeholder="https://www.figma.com/design/…?node-id=…" />
         {capabilities?.figma_mode === "mcp" && <div className="d2c-help"><button type="button" disabled={figmaChecking} onClick={() => void checkFigmaConnection()}>{figmaChecking ? "正在检查…" : "检查 Figma 插件连接"}</button>{figmaConnection && <p role="status">{figmaConnection}</p>}</div>}
-        <label className="d2c-label" htmlFor="d2c-bundle">FigmaToCode 项目包 <span>可选 ZIP，最多 10 MiB</span></label>
+        <details className="d2c-advanced"><summary>更多参考资料：FigmaToCode 项目包</summary><label className="d2c-label" htmlFor="d2c-bundle">FigmaToCode 项目包 <span>可选 ZIP，最多 10 MiB</span></label>
         <input id="d2c-bundle" type="file" accept=".zip,application/zip" onChange={(event) => {
           const file = event.target.files?.[0];
           event.target.value = "";
@@ -445,7 +445,7 @@ export default function D2CWorkbench() {
           if (!file.name.toLowerCase().endsWith(".zip") || file.size > 10 * 1024 * 1024) { setError("请选择不超过 10 MiB 的 ZIP 项目包。"); return; }
           void readFile(file).then((value) => { setBundle(value); setError(""); }).catch(() => setError("项目包读取失败。"));
         }} />
-        {bundle && <p className="d2c-help">已选择 {bundle.name} <button type="button" onClick={() => setBundle(null)}>移除</button>。源码和图片仅作为参考，包内脚本不会执行。</p>}
+        {bundle && <p className="d2c-help">已选择 {bundle.name} <button type="button" onClick={() => setBundle(null)}>移除</button>。源码和图片仅作为参考，包内脚本不会执行。</p>}</details>
         <label className="d2c-label" htmlFor="d2c-instruction">生成指令 <span>说明各份资料的用途</span></label><textarea id="d2c-instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="例如：布局按 Figma，颜色参考截图，交互按 Spec。" rows={3} />
         <details><summary>选择各维度的参考来源（可选）</summary>
           {([ ["layout", "布局"], ["style", "视觉样式"], ["content", "内容"], ["behavior", "交互"] ] as const).map(([dimension, label]) =>
@@ -453,7 +453,7 @@ export default function D2CWorkbench() {
               <option value="">按资料角色参考</option>{images.length > 0 && <option value="screenshot">第一张截图</option>}{spec.trim() && <option value="spec">Spec</option>}{figma.trim() && <option value="figma">Figma</option>}{bundle && <option value="figma_bundle">FigmaToCode 项目包</option>}{instruction.trim() && <option value="instructions">生成指令</option>}
             </select></label>)}
         </details>
-        <div className="d2c-help" aria-label="本次资料摘要">
+        <div className="d2c-help d2c-material-summary" aria-label="本次资料摘要">
           <strong>本次资料摘要</strong>
           <p>{images.length ? `${images.length} 张截图作为视觉参考` : "未添加截图"}；{spec.trim() ? "Spec 作为内容与交互参考" : "未添加 Spec"}；{figma.trim() ? "Figma 作为结构参考" : "未添加 Figma"}；{bundle ? "项目包作为源码和图片参考" : "未添加项目包"}。</p>
           <p>资料存在冲突时，请在生成指令中写明以哪一份为准。系统不会自动判断所有冲突。</p>
@@ -468,7 +468,7 @@ export default function D2CWorkbench() {
           {capabilities && !capabilities.configuration_issues.length && !capabilities.token_limit_configured && !capabilities.cost_limit_configured && <p>请确认 pnpm 已安装，且工程模板的锁文件存在。</p>}
           <button type="button" onClick={() => { void refreshCapabilities(); void restoreLastRun(); }}>重新检查服务</button>
         </div>}
-      </section><section className="d2c-card d2c-result"><div className="d2c-section-heading"><div><span className="d2c-step">OUTPUT</span><h2>生成结果</h2></div><span className="d2c-status"><span className={`d2c-dot ${run && ["READY_FOR_REVIEW", "COMPLETE_LOCAL"].includes(run.status) ? "ready" : ""}`} />{run ? statusText[run.status] || run.status : "等待开始"}</span></div>
+      </section><section className="d2c-card d2c-result"><div className="d2c-section-heading"><div><span className="d2c-step">第二步 · 查看与修改</span><h2>生成结果</h2></div><span className="d2c-status"><span className={`d2c-dot ${run && ["READY_FOR_REVIEW", "COMPLETE_LOCAL"].includes(run.status) ? "ready" : ""}`} />{run ? statusText[run.status] || run.status : "等待开始"}</span></div>
         {lastRunError && <div className="d2c-error" role="status">{lastRunError}</div>}
         {pollError && <div className="d2c-error" role="status">{pollError}</div>}
         <details><summary>最近的本机任务</summary><p className="d2c-help">从本机记录中选择，恢复只读取已有任务，不重新发起模型请求。</p><button type="button" disabled={recentBusy} onClick={() => void loadRecentRuns()}>{recentBusy ? "正在读取…" : "读取最近 20 个任务"}</button>{recentError && <p role="alert">{recentError}</p>}{recentRuns && (recentRuns.length ? <ul>{recentRuns.map((item) => <li key={item.run_id}><button type="button" disabled={isRunning} onClick={() => void handleRestore(item.run_id)}>恢复 {item.run_id}</button> {statusText[item.status] || item.status} · {new Date(item.created_at).toLocaleString()} · 模型请求 {item.model_requests} 次</li>)}</ul> : <p>本机没有任务记录。</p>)}</details>

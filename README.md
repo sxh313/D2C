@@ -1,5 +1,7 @@
 # Design2Code 本地工作台
 
+> 工作台界面更新（2026-11-10）：整理资料输入、折叠可选的 FigmaToCode 项目包、突出资料摘要与生成操作，并调整结果区及窄屏布局。前端 Vite 构建和工作台文件 ESLint 通过；全项目 lint 仍有其他已有错误，浏览器视觉复核待完成。
+
 将截图、需求 Spec 和 Figma 节点单独或组合输入，按指令生成 React + TypeScript 页面。本项目以 `screenshot-to-code` 为主工程，调用根目录 `.env` 中配置的模型服务。
 
 ## 首次准备
