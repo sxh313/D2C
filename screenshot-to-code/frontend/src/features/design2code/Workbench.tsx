@@ -59,7 +59,9 @@ async function writeDraft(draft: Draft): Promise<void> {
 const api = "/api/d2c/v1";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${api}${path}`, options);
+  let response: Response;
+  try { response = await fetch(`${api}${path}`, options); }
+  catch { throw new Error("无法连接本机服务，请检查网络和工作台是否正在运行。"); }
   if (!response.ok) {
     const problem = await response.json().catch(() => ({}));
     throw new Error(typeof problem.detail === "string" ? problem.detail : `请求失败 (${response.status})`);
