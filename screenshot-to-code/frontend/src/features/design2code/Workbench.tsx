@@ -20,7 +20,7 @@ type DialogRule = { open_button: string; dialog_name: string; close_button: stri
 const emptyDialogRule: DialogRule = { open_button: "", dialog_name: "", close_button: "" };
 type TabRule = { tab_name: string; initial_text: string; selected_text: string };
 const emptyTabRule: TabRule = { tab_name: "", initial_text: "", selected_text: "" };
-type Draft = { images: ImageInput[]; spec: string; figma: string; bundle: ImageInput | null; instruction: string; authority: Record<Dimension, string>; searchRule?: SearchRule; dialogRule?: DialogRule; tabRule?: TabRule };
+type Draft = { images: ImageInput[]; spec: string; figma: string; bundle: ImageInput | null; instruction: string; authority: Record<Dimension, string>; searchRule?: SearchRule; dialogRule?: DialogRule; tabRule?: TabRule; repairDrafts?: Record<string, string> };
 
 function openDraftDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -333,6 +333,7 @@ export default function D2CWorkbench() {
       setBundle(draft.bundle || null);
       setInstruction(draft.instruction || "");
       if (draft.authority) setAuthority(draft.authority);
+      if (draft.repairDrafts) setRepairDrafts(draft.repairDrafts);
     }).catch(() => { if (active) { setDraftStorageAvailable(false); setDraftError("无法读取或保存本机草稿；请检查浏览器存储设置。"); } })
       .finally(() => { if (active) setDraftReady(true); });
     return () => { active = false; };
@@ -342,7 +343,7 @@ export default function D2CWorkbench() {
     if (!draftReady || !draftStorageAvailable) return;
     let active = true;
     setDraftSaveState("saving");
-    const draft: Draft = { images, spec, figma, bundle, instruction, authority, searchRule, dialogRule, tabRule };
+    const draft: Draft = { images, spec, figma, bundle, instruction, authority, searchRule, dialogRule, tabRule, repairDrafts };
     const timer = window.setTimeout(() => {
       draftWrites.current = draftWrites.current.catch(() => {}).then(() => writeDraft(draft));
       void draftWrites.current.then(() => {
@@ -350,7 +351,7 @@ export default function D2CWorkbench() {
       }).catch(() => { if (active) setDraftError("草稿保存失败，请检查浏览器存储空间。"); });
     }, 300);
     return () => { active = false; window.clearTimeout(timer); };
-  }, [draftReady, draftStorageAvailable, images, spec, figma, bundle, instruction, authority, searchRule, dialogRule, tabRule]);
+  }, [draftReady, draftStorageAvailable, images, spec, figma, bundle, instruction, authority, searchRule, dialogRule, tabRule, repairDrafts]);
 
   const addImages = useCallback(async (files: File[]) => {
     if (!files.length) return;
@@ -750,7 +751,7 @@ export default function D2CWorkbench() {
     <main className="d2c-main"><div className="d2c-intro"><div><div className="d2c-eyebrow">设计资料 → 可运行页面</div><h1>把设计，变成可以运行的页面。</h1><p>添加设计资料，生成可以预览和导出的前端页面。</p></div><div className="d2c-intro-note"><span>输出</span><strong>React + TypeScript</strong></div></div>
       <div className="d2c-grid"><section className="d2c-card d2c-inputs">{draftError && <div className="d2c-error" role="alert">{draftError}</div>}<div className="d2c-section-heading"><div><span className="d2c-step">第一步 · 准备资料</span><h2>设计资料</h2></div><span className="d2c-count">{images.length + Number(!!spec.trim()) + Number(!!figma.trim()) + Number(!!bundle)} 份资料</span></div>
         <p className="d2c-input-guide">添加至少一种资料；可组合截图、需求说明、Figma 和项目包。</p>
-        <p className="d2c-draft-status" role="status">{!draftReady ? "正在读取本机草稿…" : draftError ? "草稿未保存" : imageReads > 0 ? "图片读取中" : draftSaveState === "saving" ? "草稿保存中…" : "草稿已保存到当前浏览器"}</p>
+        <p className="d2c-draft-status" role="status">{!draftReady ? "正在读取本机草稿…" : draftError ? "草稿未保存" : imageReads > 0 ? "图片读取中" : draftSaveState === "saving" ? "草稿保存中…" : "资料和修改草稿已保存到当前浏览器"}</p>
         <fieldset className="d2c-material-fields" disabled={!draftReady} aria-busy={!draftReady}>
         <label className="d2c-label">截图 <span>已添加 {images.length} / 3 张</span></label>
         <div className={`d2c-drop ${draggingImage ? "is-dragging" : ""}`} onDragOver={(event) => { event.preventDefault(); if (draftReady && Array.from(event.dataTransfer.types).includes("Files")) setDraggingImage(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDraggingImage(false); }} onDrop={(event) => { event.preventDefault(); setDraggingImage(false); if (draftReady) void addImages(Array.from(event.dataTransfer.files)); }}>
