@@ -104,7 +104,10 @@ try {
         try { $ping = Invoke-RestMethod -Uri 'http://127.0.0.1:1994/ping' -TimeoutSec 2; if ($ping.status -ne 'ok') { throw 'bridge not ready' } }
         catch { Write-Warning 'Figma bridge 尚未就绪；截图和 Spec 仍可使用，请检查 bridge 日志。' }
     }
-    Write-Output "Design2Code 已启动：http://${webHost}:${webPort}"
+    $workbenchUrl = "http://${webHost}:${webPort}"
+    Write-Output "Design2Code 已启动：$workbenchUrl"
+    try { Start-Process $workbenchUrl -ErrorAction Stop }
+    catch { Write-Warning "无法自动打开浏览器，请手动访问 $workbenchUrl。" }
 } catch {
     foreach ($proc in $started) { if (-not $proc.HasExited) { Stop-StartedTree -ParentId $proc.Id -RootStart $proc.StartTime.ToUniversalTime() } }
     Remove-Item -LiteralPath $processFile -ErrorAction SilentlyContinue
