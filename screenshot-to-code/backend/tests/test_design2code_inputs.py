@@ -49,6 +49,26 @@ def test_generated_jsx_root_image_src_uses_relative_path() -> None:
     assert files[1]["content"] == payload["files"][1]["content"]
 
 
+def test_saved_source_download_without_candidate_directory(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
+    app = FastAPI()
+    app.include_router(router)
+    result = {"files": [{"path": "src/App.tsx", "content": "NEW"}, {"path": "src/index.css", "content": "body {}"}]}
+    with storage.connect() as db:
+        for run_id, status, saved in (("run_saved", "CANCELLED", result), ("run_active", "BUILDING", result),
+                                      ("run_invalid", "FAILED", {"files": [{"path": "../x", "content": "bad"}]})):
+            db.execute("INSERT INTO runs (id,set_id,revision,source_hash,idempotency_key,request_hash,status,result_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                       (run_id, "set", 1, "hash", run_id, "hash", status, json.dumps(saved), storage.now(), storage.now()))
+    with TestClient(app) as client:
+        response = client.get("/api/d2c/v1/runs/run_saved/saved-source")
+        assert response.status_code == 200
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            assert archive.read("saved-source/src/App.tsx") == b"NEW"
+            assert "saved-source/README.txt" in archive.namelist()
+        assert client.get("/api/d2c/v1/runs/run_active/saved-source").status_code == 409
+        assert client.get("/api/d2c/v1/runs/run_invalid/saved-source").status_code == 409
+
+
 def test_visual_check_only_marks_proven_spec_only_inapplicable(monkeypatch: MonkeyPatch) -> None:
     items: dict[str, Any] = {"spec": {"input_type": "spec"}, "image": {"input_type": "screenshot"}, "figma": {"input_type": "figma"}}
     monkeypatch.setattr(runs, "get_input", lambda key: items.get(key))

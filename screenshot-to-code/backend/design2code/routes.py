@@ -18,7 +18,8 @@ from PIL import Image, ImageChops, ImageEnhance, ImageStat, UnidentifiedImageErr
 
 from design2code.inputs import import_figma, import_figma_bundle, import_figma_mcp, import_image, import_spec
 from design2code.inspection import capture_reference_viewport
-from design2code.runs import cancel_run, create_run, execute, execute_repair, read_run, request_repair
+from design2code.runs import cancel_run, create_run, execute, execute_repair, parse_files, read_run, request_repair
+from design2code.provider import ProviderError
 from design2code.runner import TEMPLATE, preview_url
 from design2code.settings import get_settings
 from design2code.storage import connect, get_input, get_source_set, identifier, json_encode, now
@@ -458,6 +459,28 @@ async def visual_diff(run_id: str, input_id: str, viewport: Literal["desktop", "
     if not path.is_file():
         raise HTTPException(404, "该视口的检查截图未生成。")
     return await asyncio.to_thread(_pixel_difference, reference, path)
+
+
+@router.get("/runs/{run_id}/saved-source")
+async def export_saved_source(run_id: str) -> StreamingResponse:
+    """Recover recorded model files even when no candidate directory was created."""
+    run = read_run(run_id)
+    if run is None:
+        raise HTTPException(404, "找不到该任务。")
+    if run["status"] not in {"FAILED", "CANCELLED"}:
+        raise HTTPException(409, "任务结束后才能下载已保存源码。")
+    try:
+        files = parse_files(json_encode({"files": (run.get("result") or {}).get("files", [])}))
+    except ProviderError as exc:
+        raise HTTPException(409, "没有完整的已保存源码。") from exc
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for item in files:
+            archive.writestr(f'saved-source/{item["path"]}', item["content"])
+        archive.writestr("saved-source/README.txt", "这些是任务记录中保存的模型源码，不包含完整工程、依赖或参考图片。请查看任务检查结果，构建状态未由此下载验证。\n")
+    output.seek(0)
+    return StreamingResponse(output, media_type="application/zip",
+                             headers={"Content-Disposition": f'attachment; filename="{run_id}-source.zip"'})
 
 
 @router.get("/runs/{run_id}/export")
