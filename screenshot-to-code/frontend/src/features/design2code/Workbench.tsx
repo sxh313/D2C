@@ -7,7 +7,7 @@ type ImageInput = { name: string; data: string };
 type Capabilities = { provider_configured: boolean; figma_mode: "mcp" | "rest"; figma_configured: boolean; generation_available: boolean; configuration_issues: string[]; token_limit_configured: boolean; cost_limit_configured: boolean };
 type SourceSet = { source_set_id: string; source_set_revision: number; source_set_hash: string };
 type PendingRun = { sourceSet: SourceSet; key: string };
-type PendingRepair = { runId: string; instruction: string; key: string };
+type PendingRepair = { runId: string; instruction: string; key: string; draftText?: string };
 type Run = { run_id: string; status: string; error: string | null; model_requests: number; repairs: number; result: { candidate_name?: string; previous_candidate?: { files: { path: string; content: string }[]; checks?: { id: string; status: string; message: string }[] }; files: { path: string; content: string }[]; checks?: { id: string; status: string; message: string }[]; build_details?: string } | null };
 type RecentRun = { run_id: string; status: string; model_requests: number; repairs: number; created_at: string };
 type Dimension = "layout" | "style" | "content" | "behavior";
@@ -645,7 +645,16 @@ export default function D2CWorkbench() {
     } catch { setLastRunError("浏览器无法保存最近任务记录，请复制当前任务 ID 以便恢复。"); }
     setPendingRepair(null);
     setPreviewAttempt((attempt) => attempt + 1);
-    updateRepairDraft(pending.runId, "");
+    // Preserve edits made after an uncertain submission. Older recovery records
+    // have no original draft text, so keep their draft rather than guessing.
+    if (pending.draftText !== undefined) {
+      setRepairDrafts((drafts) => {
+        if (drafts[pending.runId] !== pending.draftText) return drafts;
+        const next = { ...drafts };
+        delete next[pending.runId];
+        return next;
+      });
+    }
   }
 
   async function recoverPendingRepair() {
@@ -667,7 +676,7 @@ export default function D2CWorkbench() {
     try {
       const fullInstruction = selectedElement ? buildSelectedElementInstruction(repairInstruction, selectedElement.html, selectedElement.context) : repairInstruction;
       if (fullInstruction.length > 5000) throw new Error("修改要求和选中元素内容过长，请缩短要求或选择更小的元素。");
-      const pending = { runId: run.run_id, instruction: fullInstruction, key: crypto.randomUUID() };
+      const pending = { runId: run.run_id, instruction: fullInstruction, key: crypto.randomUUID(), draftText: repairInstruction };
       try { window.localStorage.setItem("d2c_pending_repair", JSON.stringify(pending)); }
       catch { throw new Error("无法保存修改恢复信息，请允许浏览器本地存储后再提交。"); }
       setPendingRepair(pending);
