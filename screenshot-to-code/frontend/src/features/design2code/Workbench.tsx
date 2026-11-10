@@ -785,7 +785,7 @@ export default function D2CWorkbench() {
         </details></details>
         <label className="d2c-label" htmlFor="d2c-figma">Figma 节点链接 <span>{!capabilities ? "正在检查配置" : capabilities.figma_mode === "mcp" ? (capabilities.figma_configured ? "MCP 模式；请在 Figma 中运行插件" : "请先安装 MCP Bridge") : (capabilities.figma_configured ? "REST 令牌已配置" : "需要配置访问令牌")}</span></label><input id="d2c-figma" value={figma} onChange={(event) => setFigma(event.target.value)} placeholder="https://www.figma.com/design/…?node-id=…" />
         {capabilities?.figma_mode === "mcp" && <div className="d2c-help"><button type="button" disabled={figmaChecking} onClick={() => void checkFigmaConnection()}>{figmaChecking ? "正在检查…" : "检查 Figma 插件连接"}</button>{figmaConnection && <p role="status">{figmaConnection}</p>}</div>}
-        <details className="d2c-advanced"><summary>更多参考资料：FigmaToCode 项目包</summary><label className="d2c-label" htmlFor="d2c-bundle">FigmaToCode 项目包 <span>可选 ZIP，最多 10 MiB</span></label>
+        <details className="d2c-advanced"><summary>更多参考资料：FigmaToCode 项目包</summary><p className="d2c-help">在 FigmaToCode 中选择 HTML 或 Tailwind，再下载 Vite、Next.js 或 HTML 项目 ZIP。Flutter 和 SwiftUI 导出不适用于此处。项目源码和图片仅作为生成参考，不会执行包内脚本。</p><label className="d2c-label" htmlFor="d2c-bundle">FigmaToCode 项目包 <span>可选 ZIP，最多 10 MiB</span></label>
         <input id="d2c-bundle" type="file" accept=".zip,application/zip" onChange={(event) => {
           const file = event.target.files?.[0];
           event.target.value = "";
