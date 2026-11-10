@@ -94,7 +94,7 @@ const statusText: Record<string, string> = {
   BUILDING: "正在构建", REPAIRING: "正在修改", READY_FOR_REVIEW: "等待查看", COMPLETE_LOCAL: "已完成",
   FAILED: "任务失败", UNKNOWN_EXTERNAL: "模型结果未知", CANCELLED: "已停止",
 };
-const checkStatusText: Record<string, string> = { PASS: "通过", FAIL: "失败", NOT_RUN: "未执行", MANUAL_REVIEW: "待人工检查" };
+const checkStatusText: Record<string, string> = { PASS: "通过", FAIL: "失败", NOT_RUN: "未执行", NOT_APPLICABLE: "不适用", MANUAL_REVIEW: "待人工检查" };
 
 type RunEvent = { seq: number; type: string; created_at: string };
 

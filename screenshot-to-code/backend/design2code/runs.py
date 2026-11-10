@@ -13,12 +13,21 @@ from design2code.provider import ProviderError, generate
 from design2code.inspection import inspect_candidate, inspect_interactions
 from design2code.runner import build_candidate, cancel_build
 from design2code.settings import get_settings
-from design2code.storage import connect, get_source_set, identifier, json_encode, now
+from design2code.storage import connect, get_input, get_source_set, identifier, json_encode, now
 
 
 def _event(db: Any, run_id: str, event_type: str, payload: dict[str, Any]) -> None:
     row = db.execute("SELECT COALESCE(MAX(seq), 0) + 1 FROM run_events WHERE run_id = ?", (run_id,)).fetchone()
     db.execute("INSERT INTO run_events VALUES (?, ?, ?, ?, ?)", (run_id, row[0], event_type, json_encode(payload), now()))
+
+
+def _visual_check(source_set: dict[str, Any], repaired: bool = False) -> dict[str, str]:
+    sources: Any = source_set.get("sources")
+    if isinstance(sources, list) and sources:
+        inputs = [get_input(source.get("input_id", "")) for source in cast(list[Any], sources) if isinstance(source, dict)]
+        if len(inputs) == len(sources) and all(item is not None and item.get("input_type") == "spec" for item in inputs):
+            return {"id": "visual", "status": "NOT_APPLICABLE", "message": "仅提供了 Spec，没有图片参考，视觉参考图对比不适用；仍需人工检查页面样式。"}
+    return {"id": "visual", "status": "NOT_RUN", "message": "修复后的视觉自动对比尚未执行。" if repaired else "视觉还原自动对比尚未执行。"}
 
 
 def recover_interrupted_runs() -> None:
@@ -149,7 +158,7 @@ async def execute(run_id: str) -> None:
             invalid_result = {"files": [], "usage": usage, "cost": None, "cost_status": "UNKNOWN",
                               "invalid_output": text[:100_000], "build_details": str(exc),
                               "checks": [{"id": "build", "status": "NOT_RUN", "message": "生成内容无效，未执行构建。"},
-                                         {"id": "visual", "status": "NOT_RUN", "message": "未执行视觉检查。"},
+                                         _visual_check(source_set),
                                          {"id": "interactions", "status": "NOT_RUN", "message": "未执行交互检查。"}]}
             with connect() as db:
                 changed = db.execute("UPDATE runs SET status='FAILED', result_json=?, error=?, updated_at=? WHERE id=? AND status='GENERATING'",
@@ -167,7 +176,7 @@ async def execute(run_id: str) -> None:
         build = await asyncio.to_thread(build_candidate, run_id, files)
         result["checks"] = [
             {"id": "build", "status": build["status"], "message": build["message"]},
-            {"id": "visual", "status": "NOT_RUN", "message": "视觉还原自动对比尚未执行。"},
+            _visual_check(source_set),
             {"id": "interactions", "status": "NOT_RUN", "message": "交互尚未执行自动检查。"},
             {"id": "manual_review", "status": "MANUAL_REVIEW" if build["status"] == "PASS" else "NOT_RUN",
              "message": "请人工核对视觉还原与需求交互。" if build["status"] == "PASS" else "构建通过后才能人工核对页面。"},
@@ -261,7 +270,7 @@ async def execute_repair(run_id: str, instruction: str) -> None:
             "candidate_name": "candidate-2", "previous_candidate": original,
             "checks": [
                 {"id": "build", "status": build["status"], "message": build["message"]},
-                {"id": "visual", "status": "NOT_RUN", "message": "修复后的视觉自动对比尚未执行。"},
+                _visual_check(source_set, repaired=True),
                 {"id": "interactions", "status": "NOT_RUN", "message": "修复后的交互尚未执行检查。"},
                 {"id": "manual_review", "status": "MANUAL_REVIEW" if build["status"] == "PASS" else "NOT_RUN",
                  "message": "请人工重新核对视觉还原与需求交互。" if build["status"] == "PASS" else "构建通过后才能人工核对页面。"},

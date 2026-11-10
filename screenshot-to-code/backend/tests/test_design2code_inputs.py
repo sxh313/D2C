@@ -49,6 +49,17 @@ def test_generated_jsx_root_image_src_uses_relative_path() -> None:
     assert files[1]["content"] == payload["files"][1]["content"]
 
 
+def test_visual_check_only_marks_proven_spec_only_inapplicable(monkeypatch: MonkeyPatch) -> None:
+    items: dict[str, Any] = {"spec": {"input_type": "spec"}, "image": {"input_type": "screenshot"}, "figma": {"input_type": "figma"}}
+    monkeypatch.setattr(runs, "get_input", lambda key: items.get(key))
+    def source(*ids: str) -> dict[str, Any]:
+        return {"sources": [{"input_id": item} for item in ids]}
+    assert runs._visual_check(source("spec"))["status"] == "NOT_APPLICABLE"
+    assert runs._visual_check(source("spec"), repaired=True)["status"] == "NOT_APPLICABLE"
+    for ids in (("image",), ("figma",), ("spec", "image"), ("spec", "missing"), ()):
+        assert runs._visual_check(source(*ids))["status"] == "NOT_RUN"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("payload, expected", [({"data": [{}]}, "connected"), ({"data": []}, "no_session"), ({"error": "failed"}, "unavailable")])
 async def test_figma_connection_status(monkeypatch: MonkeyPatch, payload: dict[str, Any], expected: str) -> None:
@@ -841,7 +852,7 @@ def test_confirmed_run_is_idempotent_and_calls_model_once(
     assert snapshot["status"] == "READY_FOR_REVIEW"
     assert snapshot["model_requests"] == 1
     assert call_count == 1
-    assert snapshot["result"]["checks"][1]["status"] == "NOT_RUN"
+    assert snapshot["result"]["checks"][1]["status"] == "NOT_APPLICABLE"
     assert next(check for check in snapshot["result"]["checks"] if check["id"] == "manual_review")["status"] == "MANUAL_REVIEW"
     repair_headers = {"Idempotency-Key": "test-repair-once"}
     repair_body = {"instruction": "修改标题"}
@@ -853,6 +864,7 @@ def test_confirmed_run_is_idempotent_and_calls_model_once(
     assert repaired["model_requests"] == 2
     assert repaired["repairs"] == 1
     assert repaired["result"]["candidate_name"] == "candidate-2"
+    assert next(check for check in repaired["result"]["checks"] if check["id"] == "visual")["status"] == "NOT_APPLICABLE"
     assert next(check for check in repaired["result"]["checks"] if check["id"] == "manual_review")["status"] == "MANUAL_REVIEW"
     assert call_count == 2
 
