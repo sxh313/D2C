@@ -58,10 +58,12 @@ async function writeDraft(draft: Draft): Promise<void> {
 
 const api = "/api/d2c/v1";
 
+class NetworkError extends Error {}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   let response: Response;
   try { response = await fetch(`${api}${path}`, options); }
-  catch { throw new Error("无法连接本机服务，请检查网络和工作台是否正在运行。"); }
+  catch { throw new NetworkError("无法连接本机服务，请检查网络和工作台是否正在运行。"); }
   if (!response.ok) {
     const problem = await response.json().catch(() => ({}));
     throw new Error(typeof problem.detail === "string" ? problem.detail : `请求失败 (${response.status})`);
@@ -742,7 +744,11 @@ export default function D2CWorkbench() {
         try { if (window.localStorage.getItem("d2c_last_run") === run.run_id) window.localStorage.removeItem("d2c_last_run"); }
         catch { setLastRunError("无法清除浏览器中的最近任务标记。 "); }
       }
-    } catch (caught) { setRecentError(caught instanceof Error ? caught.message : "删除失败，请刷新列表后重试。"); }
+    } catch (caught) {
+      setRecentError(caught instanceof NetworkError
+        ? "删除结果尚未确认。请检查连接并重新读取最近任务，确认记录是否仍在。"
+        : caught instanceof Error ? caught.message : "删除失败，请刷新列表后重试。");
+    }
     finally { setRecentBusy(false); }
   }
 
