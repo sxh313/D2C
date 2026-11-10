@@ -118,6 +118,37 @@ async def test_repair_execution_claim_prevents_duplicate_model_calls(tmp_path: P
     assert calls == 1
 
 
+@pytest.mark.asyncio
+async def test_invalid_generation_can_be_repaired_once(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
+    monkeypatch.setattr(runs, "get_settings", lambda: SimpleNamespace(model_ready=True, token_limit=None,
+        cost_limit_micro_usd=None, model_request_limit=2, repair_limit=1))
+    monkeypatch.setattr(runs, "get_source_set", lambda *_args: {})
+    monkeypatch.setattr(runs, "build_candidate", lambda *_args: {"status": "FAIL", "message": "simulated build"})
+    calls: list[str] = []
+    async def fake_generate(_settings: Any, _source_set: Any, repair_context: str = "") -> tuple[str, dict[str, Any]]:
+        calls.append(repair_context)
+        if not repair_context:
+            return "invalid model response", {}
+        return ('{"files":[{"path":"src/App.tsx","content":"app"},{"path":"src/index.css","content":""}]}', {})
+    monkeypatch.setattr(runs, "generate", fake_generate)
+    with storage.connect() as db:
+        db.execute("INSERT INTO runs (id,set_id,revision,source_hash,idempotency_key,request_hash,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                   ("run_invalid", "set", 1, "hash", "invalid-key", "hash", "CREATED", storage.now(), storage.now()))
+    await runs.execute("run_invalid")
+    failed = runs.read_run("run_invalid")
+    assert failed is not None and failed["status"] == "FAILED" and failed["result"]["files"] == []
+    assert failed["result"]["checks"][0]["status"] == "NOT_RUN"
+    assert runs.request_repair("run_invalid", "fix the response", "invalid-repair-key")
+    await runs.execute_repair("run_invalid", "fix the response")
+    repaired = runs.read_run("run_invalid")
+    assert repaired is not None and repaired["model_requests"] == 2 and repaired["repairs"] == 1
+    assert repaired["result"]["candidate_name"] == "candidate-2"
+    assert "invalid model response" in calls[1]
+    with pytest.raises(HTTPException):
+        runs.request_repair("run_invalid", "again", "second-repair-key")
+
+
 def test_storage_closes_connection_and_rolls_back(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(storage, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
     with pytest.raises(ValueError):

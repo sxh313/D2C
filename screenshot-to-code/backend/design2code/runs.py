@@ -135,7 +135,22 @@ async def execute(run_id: str) -> None:
         if source_set is None:
             raise ProviderError("INPUT_MISSING", "任务资料不存在。")
         text, usage = await generate(settings, source_set)
-        files = parse_files(text)
+        try:
+            files = parse_files(text)
+        except ProviderError as exc:
+            # Preserve a bounded response only when the provider returned text
+            # but it was not a usable file set. Repair remains user initiated.
+            invalid_result = {"files": [], "usage": usage, "cost": None, "cost_status": "UNKNOWN",
+                              "invalid_output": text[:100_000], "build_details": str(exc),
+                              "checks": [{"id": "build", "status": "NOT_RUN", "message": "生成内容无效，未执行构建。"},
+                                         {"id": "visual", "status": "NOT_RUN", "message": "未执行视觉检查。"},
+                                         {"id": "interactions", "status": "NOT_RUN", "message": "未执行交互检查。"}]}
+            with connect() as db:
+                changed = db.execute("UPDATE runs SET status='FAILED', result_json=?, error=?, updated_at=? WHERE id=? AND status='GENERATING'",
+                                     (json_encode(invalid_result), str(exc), now(), run_id))
+                if changed.rowcount:
+                    _event(db, run_id, "FAILED", {"status": "FAILED", "code": exc.code, "message": str(exc)})
+            return
         result: dict[str, Any] = {"files": files, "usage": usage, "cost": None, "cost_status": "UNKNOWN", "candidate_name": "candidate"}
         with connect() as db:
             changed = db.execute("UPDATE runs SET status = 'BUILDING', result_json = ?, updated_at = ? WHERE id = ? AND status = 'GENERATING'",
@@ -225,6 +240,7 @@ async def execute_repair(run_id: str, instruction: str) -> None:
         if source_set is None:
             raise ProviderError("INPUT_MISSING", "任务资料不存在。")
         feedback = json_encode({"instruction": instruction, "files": original["files"],
+                                "invalid_output": original.get("invalid_output", ""),
                                 "build_details": original.get("build_details", "")})
         text, usage = await generate(get_settings(), source_set, repair_context=feedback)
         files = parse_files(text)
