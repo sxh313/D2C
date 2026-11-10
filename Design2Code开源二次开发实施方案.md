@@ -2369,3 +2369,8 @@ README 首次准备已补充后端、前端、Bridge server 和插件构建命�
 
 - 对 `run_5b549d67725047a283a64f9bbca84d82` 提交一次真实修改，要求保留初始错误页，重试后加载三项本地示例商品，支持名称搜索、升降序和无结果状态。当前为 candidate-2，累计模型请求 2 次、修改 1 次；build、viewport、interaction_smoke 为 PASS，visual、interactions 为 NOT_RUN，manual_review 为 MANUAL_REVIEW。
 - 独立浏览器操作确认：初始错误页的重试后显示 Black Trousers、Blue Shirt、Red Shirt 及相应价格；切换名称降序后顺序为 Red、Blue、Black；搜索 `shirt` 只显示两件衬衫；输入无匹配词显示 `No products found`。这些数据只在本地页面状态中，不证明远程数据或持久化；未复核所有异常和视觉细节。
+
+### 2026-11-11：同源三资料样例修改后导出
+
+- 下载 `run_5b549d67725047a283a64f9bbca84d82` 的 candidate-2 ZIP，在新建临时目录解压，使用 `pnpm install --frozen-lockfile` 安装并构建成功；依赖全部来自本机缓存，pnpm 提示忽略 esbuild 构建脚本。启动本地 Vite 后首页 HTTP 200，随后停止该验证服务。
+- 导出 report.json 确认任务 ID、candidate-2、模型请求 2 次；build、viewport、interaction_smoke 为 PASS，visual、interactions 为 NOT_RUN，manual_review 为 MANUAL_REVIEW。此次没有在干净机器或空缓存环境安装，也没有重新调用模型。
