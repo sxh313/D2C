@@ -251,9 +251,12 @@ export default function D2CWorkbench() {
     setSelecting(enabled);
   }
   useEffect(() => {
+    let active = true;
+    setPreview("");
     if (!currentRunId || !currentStatus || !["READY_FOR_REVIEW", "COMPLETE_LOCAL"].includes(currentStatus)) return;
-    request<{ url: string }>(`/runs/${currentRunId}/preview`).then((value) => setPreview(value.url))
-      .catch(() => setError("预览服务启动失败，请检查本机预览端口。"));
+    request<{ url: string }>(`/runs/${currentRunId}/preview`).then((value) => { if (active) setPreview(value.url); })
+      .catch(() => { if (active) setError("预览服务启动失败，请检查本机预览端口。"); });
+    return () => { active = false; };
   }, [currentRunId, currentStatus, currentCandidate]);
 
   async function handleGenerate() {
