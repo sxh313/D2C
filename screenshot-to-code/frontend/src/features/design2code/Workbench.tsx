@@ -59,6 +59,9 @@ async function writeDraft(draft: Draft): Promise<void> {
 const api = "/api/d2c/v1";
 
 class NetworkError extends Error {}
+class HttpError extends Error {
+  constructor(public readonly status: number, message: string) { super(message); }
+}
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   let response: Response;
@@ -66,7 +69,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   catch { throw new NetworkError("无法连接本机服务，请检查网络和工作台是否正在运行。"); }
   if (!response.ok) {
     const problem = await response.json().catch(() => ({}));
-    throw new Error(typeof problem.detail === "string" ? problem.detail : `请求失败 (${response.status})`);
+    throw new HttpError(response.status, typeof problem.detail === "string" ? problem.detail : `请求失败 (${response.status})`);
   }
   return response.json() as Promise<T>;
 }
@@ -422,8 +425,10 @@ export default function D2CWorkbench() {
       const restored = await request<Run>(`/runs/${lastRun}`);
       setRun((current) => current || restored);
       setLastRunError("");
-    } catch {
-      setLastRunError("暂时无法恢复上次任务；服务恢复后可点击重新检查服务，或按任务 ID 恢复。");
+    } catch (caught) {
+      setLastRunError(caught instanceof HttpError && caught.status === 404
+        ? "上次任务记录不存在或已删除；请从最近任务中选择其他记录，或按任务 ID 恢复。"
+        : "暂时无法恢复上次任务；服务恢复后可点击重新检查服务，或按任务 ID 恢复。");
     }
   }, []);
   const refreshCapabilities = useCallback(async () => {
