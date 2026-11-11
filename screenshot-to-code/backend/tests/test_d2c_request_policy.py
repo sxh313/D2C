@@ -38,10 +38,8 @@ def sdk_transport(monkeypatch: pytest.MonkeyPatch, *, fail: bool = False) -> lis
                 "name": "create_file", "arguments": json.dumps({"path": "index.html",
                 "content": "<html><body><h1>Tool output</h1></body></html>"})}
         event: dict[str, Any] = {"type": "response.output_item.done", "output_index": 0, "item": item}
-        text_event: dict[str, Any] = {"type": "response.output_text.delta", "delta": "<html><body>Final output</body></html>"}
         return httpx.Response(200, headers={"content-type": "text/event-stream"},
-                             content=(f"data: {json.dumps(text_event)}\n\n"
-                                      f"data: {json.dumps(event)}\n\ndata: [DONE]\n\n"))
+                             content=f"data: {json.dumps(event)}\n\ndata: [DONE]\n\n")
 
     def client(**kwargs: Any) -> AsyncOpenAI:
         assert kwargs["max_retries"] == 0
@@ -73,8 +71,12 @@ async def test_actual_sdk_boundary_counts_initial_and_repair_without_third_reque
     await runs.execute("run_policy")
     first = runs.read_run("run_policy")
     assert first and first["model_requests"] == 1
-    assert first["result"].get("tool_policy", {}).get("agent_completion") in {"completed", "request_limit_reached"}, first
-    assert "Final output" in first["result"]["files"][0]["content"]
+    assert first["result"]["tool_policy"]["agent_completion"] == "request_limit_reached"
+    assert "Tool output" in first["result"]["files"][0]["content"]
+    assert any(event["name"] == "create_file" and event.get("ok") is True
+               for event in first["result"]["tools"])
+    assert any(check["id"] == "agent_feedback" and check["status"] == "NOT_RUN"
+               for check in first["result"]["checks"])
     assert runs.request_repair("run_policy", "change", "repair-key")
     # Merely queuing a repair does not pretend the request has been sent.
     queued = runs.read_run("run_policy")
@@ -181,5 +183,5 @@ async def test_bounded_engine_does_not_apply_native_cost_ceiling(monkeypatch: py
     monkeypatch.setattr(OpenAIProviderSession, "total_cost_usd", lambda _: 1_000_000.0)
     engine = AgentEngine(sink, 0, "test", "https://example.invalid", None, None, None, False,
                          max_turns=1, enable_screenshot_preview=False, request_policy=RequestPolicy(1))
-    assert "Final output" in await engine.run(Llm.GPT_6_LUNA_LOW, [])
-    assert engine.completion_status == "completed"
+    assert "Tool output" in await engine.run(Llm.GPT_6_LUNA_LOW, [])
+    assert engine.completion_status == "request_limit_reached"

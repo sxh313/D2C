@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from PIL import Image
+from pydantic import BaseModel
 
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
@@ -237,6 +238,11 @@ async def parse_event(
     state: OpenAIResponsesParseState,
     on_event: EventSink,
 ) -> None:
+    # The SDK yields typed Pydantic events and nested output items. Keep the
+    # provider-native payload serializable for tool execution and continuation.
+    # Raw dictionaries from compatible transports remain supported.
+    if isinstance(event, BaseModel):
+        event = event.model_dump(mode="python", exclude_none=True)
     event_type = _get_event_attr(event, "type")
     if event_type in (
         "response.created",
@@ -548,8 +554,15 @@ class OpenAIProviderSession(ProviderSession):
 
         state = OpenAIResponsesParseState()
         stream = await self._client.responses.create(**params)  # type: ignore
-        async for event in stream:  # type: ignore
-            await parse_event(event, state, on_event)
+        try:
+            async for event in stream:  # type: ignore
+                await parse_event(event, state, on_event)
+        finally:
+            # Release a streaming HTTP response even if parsing or a consumer
+            # callback fails. Older test/provider stream adapters may not close.
+            close_stream = getattr(stream, "close", None)
+            if close_stream is not None:
+                await close_stream()
 
         if state.turn_usage is not None:
             self._prompt_report_logger.record_usage(state.turn_usage)
