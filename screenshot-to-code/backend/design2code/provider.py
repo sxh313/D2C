@@ -147,26 +147,14 @@ Use Simplified Chinese by default unless the user requests the design's original
 
     if not html.strip():
         raise ProviderError("AGENT_EMPTY", "上游 Agent 未生成页面内容。")
-    # The upstream prompt intentionally produces a single HTML file.  Embed it
-    # as a React component without changing its markup, styles or handlers.
-    escaped = html.replace("`", "\\`").replace("${", "\\${")
-    app = ("import React, { useEffect, useRef } from 'react';\n"
-           "import './index.css';\n\n"
-           f"const markup = `{escaped}`;\n"
-           "export default function App() {\n"
-           "  const host = useRef<HTMLDivElement>(null);\n"
-           "  useEffect(() => {\n"
-           "    host.current?.querySelectorAll('script').forEach((node) => {\n"
-           "      const script = document.createElement('script');\n"
-           "      script.text = node.textContent || '';\n"
-           "      document.body.appendChild(script);\n"
-           "      script.remove();\n"
-           "    });\n"
-           "  }, []);\n"
-           "  return <div ref={host} className=\"d2c-agent-output\" dangerouslySetInnerHTML={{ __html: markup }} />;\n"
-           "}\n")
-    result: dict[str, Any] = {"files": [{"path": "src/App.tsx", "content": app},
-                         {"path": "src/index.css", "content": "html, body, #root { min-height: 100%; margin: 0; }\n"}],
+    # Compile classic scripts as local bundle modules; the preview deliberately
+    # disallows inline/eval execution. Figma projects retain their actual files.
+    from design2code.html_project import html_project
+    try:
+        wrapped_files = html_project(html) if project_files is None else []
+    except ValueError as exc:
+        raise ProviderError("AGENT_HTML_UNSUPPORTED", str(exc)) from exc
+    result: dict[str, Any] = {"files": wrapped_files,
               "engine": "screenshot-to-code-agent",
               "engine_version": "a8139779f7c5ae231b7f2a86fa7f83ddc5f7badc",
               "generation_id": generation_id,
