@@ -8,3 +8,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .playwright-cli/
+
+# Only README files are allowed in the repository; keep other Markdown local.
+*.md
+*.MD
+!README.md
+!**/README.md
