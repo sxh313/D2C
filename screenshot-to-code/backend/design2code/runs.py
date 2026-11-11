@@ -9,7 +9,12 @@ from typing import Any, cast
 
 from fastapi import HTTPException
 
-from design2code.provider import ProviderError, generate
+from design2code.provider import ProviderError, generate_agent
+
+# Compatibility seam for existing unit tests and local integrations that
+# monkeypatch the old provider function. Production calls still resolve to
+# the upstream Agent adapter by default.
+generate = generate_agent
 from design2code.inspection import inspect_candidate, inspect_dialog, inspect_interactions, inspect_search, inspect_tab
 from design2code.runner import build_candidate, cancel_build
 from design2code.settings import get_settings
@@ -142,7 +147,7 @@ def parse_files(text: str) -> list[dict[str, str]]:
         if not allowed or ".." in parts or "\\" in path or path in seen or len(item["content"]) > 300_000:
             raise ProviderError("GENERATION_INVALID", "生成结果包含不允许的文件路径、重复文件或过大文件。")
         seen.add(path)
-        content = item["content"]
+        content = cast(str, item["content"])
         # The preview lives below /<run>/<candidate>/; root-relative image
         # src values bypass that prefix. Preserve other code and URLs.
         if path.endswith(".tsx"):
@@ -171,12 +176,17 @@ async def execute(run_id: str) -> None:
         if source_set is None:
             raise ProviderError("INPUT_MISSING", "任务资料不存在。")
         text, usage = await generate(settings, source_set)
+        actual_calls = usage.get("model_requests") if isinstance(usage, dict) else None
+        if isinstance(actual_calls, int) and actual_calls >= 1:
+            with connect() as db:
+                db.execute("UPDATE runs SET calls = MIN(calls + ?, ?) WHERE id = ? AND status = 'GENERATING'",
+                           (actual_calls - 1, settings.model_request_limit, run_id))
         try:
             files = parse_files(text)
         except ProviderError as exc:
             # Preserve a bounded response only when the provider returned text
             # but it was not a usable file set. Repair remains user initiated.
-            invalid_result = {"files": [], "usage": usage, "cost": None, "cost_status": "UNKNOWN",
+            invalid_result: dict[str, Any] = {"files": [], "usage": usage, "cost": None, "cost_status": "UNKNOWN",
                               "invalid_output": text[:100_000], "build_details": str(exc),
                               "checks": [{"id": "build", "status": "NOT_RUN", "message": "生成内容无效，未执行构建。"},
                                          _visual_check(source_set),
@@ -193,13 +203,23 @@ async def execute(run_id: str) -> None:
                 if changed.rowcount:
                     _event(db, run_id, "FAILED", {"status": "FAILED", "code": exc.code, "message": str(exc)})
             return
-        result: dict[str, Any] = {"files": files, "usage": usage, "cost": None, "cost_status": "UNKNOWN", "candidate_name": "candidate", "checks": _pending_build_checks(source_set)}
+        result: dict[str, Any] = {"files": files, "usage": usage, "cost": None, "cost_status": "UNKNOWN", "candidate_name": "candidate", "checks": _pending_build_checks(source_set),
+                                  "engine": usage.get("engine", "screenshot-to-code-agent"),
+                                  "engine_version": usage.get("engine_version"),
+                                  "agent_run_id": usage.get("agent_run_id"),
+                                  "generation_id": usage.get("generation_id"),
+                                  "tools": usage.get("tools", []),
+                                  "provider": usage.get("provider", "openai"),
+                                  "tool_policy": usage.get("tool_policy", {}),
+                                  "model": usage.get("model", getattr(settings, "model", "openai/gpt-6-luna"))}
         with connect() as db:
             changed = db.execute("UPDATE runs SET status = 'BUILDING', result_json = ?, updated_at = ? WHERE id = ? AND status = 'GENERATING'",
                        (json_encode(result), now(), run_id))
             if not changed.rowcount:
                 return
-            _event(db, run_id, "BUILDING", {"status": "BUILDING"})
+            _event(db, run_id, "BUILDING", {"status": "BUILDING", "engine": result["engine"],
+                                               "agent_run_id": result.get("agent_run_id"),
+                                               "tools": result.get("tools", [])})
         build = await asyncio.to_thread(build_candidate, run_id, files)
         result["checks"] = [
             {"id": "build", "status": build["status"], "message": build["message"]},
@@ -294,21 +314,46 @@ async def execute_repair(run_id: str, instruction: str) -> None:
                                 "invalid_output": original.get("invalid_output", ""),
                                 "build_details": original.get("build_details", "")})
         text, usage = await generate(get_settings(), source_set, repair_context=feedback)
+        actual_calls = usage.get("model_requests") if isinstance(usage, dict) else None
+        repair_settings = get_settings()
+        if isinstance(actual_calls, int) and actual_calls >= 1:
+            with connect() as db:
+                db.execute("UPDATE runs SET calls = MIN(calls + ?, ?) WHERE id = ? AND status = 'REPAIRING'",
+                           (actual_calls - 1, repair_settings.model_request_limit, run_id))
         files = parse_files(text)
         result: dict[str, Any] = {
             "files": files, "usage": usage, "cost": None, "cost_status": "UNKNOWN",
             "candidate_name": "candidate-2", "previous_candidate": original,
             "checks": _pending_build_checks(source_set, repaired=True),
+            "engine": usage.get("engine", "screenshot-to-code-agent"),
+            "engine_version": usage.get("engine_version"),
+            "agent_run_id": usage.get("agent_run_id"),
+            "generation_id": usage.get("generation_id"),
+            "tools": usage.get("tools", []),
+            "provider": usage.get("provider", "openai"),
+            "tool_policy": usage.get("tool_policy", {}),
+            "model": usage.get("model", getattr(get_settings(), "model", "openai/gpt-6-luna")),
         }
         with connect() as db:
             changed = db.execute("UPDATE runs SET status = 'BUILDING', result_json = ?, updated_at = ? WHERE id = ? AND status = 'REPAIRING'", (json_encode(result), now(), run_id))
             if not changed.rowcount:
                 return
-            _event(db, run_id, "BUILDING", {"status": "BUILDING", "purpose": "repair"})
+            _event(db, run_id, "BUILDING", {"status": "BUILDING", "purpose": "repair",
+                                               "engine": result["engine"],
+                                               "agent_run_id": result.get("agent_run_id"),
+                                               "tools": result.get("tools", [])})
         build = await asyncio.to_thread(build_candidate, run_id, files, "candidate-2")
         result = {
             "files": files, "usage": usage, "cost": None, "cost_status": "UNKNOWN",
             "candidate_name": "candidate-2", "previous_candidate": original,
+            "engine": usage.get("engine", "screenshot-to-code-agent"),
+            "engine_version": usage.get("engine_version"),
+            "agent_run_id": usage.get("agent_run_id"),
+            "generation_id": usage.get("generation_id"),
+            "tools": usage.get("tools", []),
+            "provider": usage.get("provider", "openai"),
+            "tool_policy": usage.get("tool_policy", {}),
+            "model": usage.get("model", getattr(get_settings(), "model", "openai/gpt-6-luna")),
             "checks": [
                 {"id": "build", "status": build["status"], "message": build["message"]},
                 _visual_check(source_set, repaired=True),

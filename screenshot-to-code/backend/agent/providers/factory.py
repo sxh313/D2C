@@ -27,6 +27,7 @@ def create_provider_session(
     replicate_api_key: Optional[str],
     should_extract_assets: bool = True,
     recorder: Optional[AgentRunRecorder] = None,
+    screenshot_enabled: Optional[bool] = None,
 ) -> ProviderSession:
     canonical_tools = canonical_tool_definitions(
         image_generation_enabled=should_generate_images,
@@ -35,7 +36,8 @@ def create_provider_session(
         # The extract_assets tool calls Gemini, so don't offer it without a key.
         asset_extraction_enabled=should_extract_assets and bool(gemini_api_key),
         # screenshot_preview needs headless Chromium; skip it if it can't launch.
-        screenshot_enabled=is_screenshot_preview_available(),
+        screenshot_enabled=(is_screenshot_preview_available()
+                            if screenshot_enabled is None else screenshot_enabled),
     )
 
     if model in OPENAI_MODELS:

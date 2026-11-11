@@ -1,0 +1,18 @@
+html {
+  overscroll-behavior: none;
+}
+
+body {
+  overscroll-behavior: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+@view-transition {
+    navigation: auto;
+}
+
+/* Keep navbar persistent */
+.top-bar {
+    view-transition-name: top-bar;
+}

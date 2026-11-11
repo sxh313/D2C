@@ -60,6 +60,8 @@ async def capabilities() -> dict[str, object]:
         "cost_limit_configured": settings.cost_limit_micro_usd is not None,
         "model_request_limit": settings.model_request_limit,
         "repair_limit": settings.repair_limit,
+        "auto_retry_limit": settings.auto_retry_limit,
+        "agent_engine": "screenshot-to-code-agent",
         "configuration_issues": list(settings.issues),
         "generation_available": settings.model_ready and settings.token_limit is None
         and settings.cost_limit_micro_usd is None and (TEMPLATE / "pnpm-lock.yaml").is_file()
@@ -532,6 +534,19 @@ async def export_run(run_id: str, version: Literal["current", "previous"] = "cur
         archive.writestr("design2code-page/report.json", json_encode({
             "run_id": run_id, "status": run["status"], "source_set_hash": run["source_set_hash"],
             "model_requests": run["model_requests"], "candidate_version": version, "candidate_name": candidate_name,
+            "engine": (run.get("result") or {}).get("engine"),
+            "engine_version": (run.get("result") or {}).get("engine_version"),
+            "agent_run_id": (run.get("result") or {}).get("agent_run_id"),
+            "provider": (run.get("result") or {}).get("provider"),
+            "model": (run.get("result") or {}).get("model"),
+            "tools": (run.get("result") or {}).get("tools", []),
+            # Older tasks stored policy only inside the provider usage object.
+            # Keep exports truthful for those tasks while new runs continue to
+            # persist the normalized top-level field.
+            "tool_policy": (run.get("result") or {}).get("tool_policy")
+                           or ((run.get("result") or {}).get("usage") or {}).get("tool_policy", {}),
+            "repair_requests": run.get("repairs", 0),
+            "auto_retry_count": 0,
             "checks": (run["result"] or {}).get("checks", []),
             "candidate_review_hash": candidate_hash, "manual_review": manual_review,
             "cost_status": "UNKNOWN", "error": run["error"],

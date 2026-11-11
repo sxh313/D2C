@@ -67,10 +67,16 @@ class AgentEngine:
         initial_file_state: Optional[Dict[str, str]] = None,
         option_codes: Optional[List[str]] = None,
         recorder: Optional[AgentRunRecorder] = None,
+        max_turns: int = 30,
+        enable_screenshot_preview: bool = True,
     ):
         self.send_message = send_message
         self.variant_index = variant_index
         self.recorder = recorder
+        # Workbench callers can enforce their per-run provider request budget;
+        # the native UI keeps the historical 30-turn Agent behaviour.
+        self.max_turns = max(1, max_turns)
+        self.enable_screenshot_preview = enable_screenshot_preview
         self.openai_api_key = openai_api_key
         self.openai_base_url = openai_base_url
         self.anthropic_api_key = anthropic_api_key
@@ -216,7 +222,7 @@ class AgentEngine:
             self._mark_preview_length(tool_event_id, len(content))
 
     async def _run_with_session(self, session: ProviderSession) -> str:
-        max_steps = 30
+        max_steps = self.max_turns
 
         for _ in range(max_steps):
             assistant_event_id = self._next_event_id("assistant")
@@ -350,6 +356,7 @@ class AgentEngine:
                 self.should_extract_assets and bool(self.tool_runtime.input_images)
             ),
             recorder=self.recorder,
+            screenshot_enabled=self.enable_screenshot_preview,
         )
         try:
             result = await self._run_with_session(session)

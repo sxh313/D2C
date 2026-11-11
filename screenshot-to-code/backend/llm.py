@@ -28,6 +28,9 @@ class Llm(Enum):
     GPT_6_1_SOL_HIGH = "gpt-6.1-sol (high thinking)"
     GPT_6_1_SOL_XHIGH = "gpt-6.1-sol (xhigh thinking)"
     GPT_6_1_SOL_MAX = "gpt-6.1-sol (max thinking)"
+    # Design2Code's configured relay model.  Keep the relay namespace in the
+    # actual API name so OpenAI-compatible gateways receive the exact model id.
+    GPT_6_LUNA_LOW = "openai/gpt-6-luna (low thinking)"
     # Claude
     CLAUDE_SONNET_4_6 = "claude-sonnet-4-6"
     CLAUDE_OPUS_5_5_LOW = "claude-opus-5-5 (low effort)"
@@ -99,6 +102,7 @@ MODEL_PROVIDER: dict[Llm, str] = {
     Llm.GPT_6_1_SOL_HIGH: "openai",
     Llm.GPT_6_1_SOL_XHIGH: "openai",
     Llm.GPT_6_1_SOL_MAX: "openai",
+    Llm.GPT_6_LUNA_LOW: "openai",
     # Anthropic models
     Llm.CLAUDE_SONNET_4_6: "anthropic",
     Llm.CLAUDE_OPUS_5_5_LOW: "anthropic",
@@ -182,6 +186,7 @@ OPENAI_MODEL_CONFIG: dict[Llm, dict[str, str]] = {
     Llm.GPT_6_1_SOL_HIGH: {"api_name": "gpt-6.1-sol", "reasoning_effort": "high"},
     Llm.GPT_6_1_SOL_XHIGH: {"api_name": "gpt-6.1-sol", "reasoning_effort": "xhigh"},
     Llm.GPT_6_1_SOL_MAX: {"api_name": "gpt-6.1-sol", "reasoning_effort": "max"},
+    Llm.GPT_6_LUNA_LOW: {"api_name": "openai/gpt-6-luna", "reasoning_effort": "low"},
 }
 
 

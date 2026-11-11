@@ -1,6 +1,13 @@
-"""One explicitly selected model request, with no retries or tool calls."""
+"""Model adapters used by the local workbench.
+
+``generate`` is the small compatibility adapter used by the historical D2C
+tests.  ``generate_agent`` is the production workbench path: it enters the
+upstream screenshot-to-code Agent, provider session and tool runtime instead
+of recreating that protocol locally.
+"""
 
 import json
+import uuid
 from typing import Any, cast
 from urllib.parse import quote
 
@@ -8,6 +15,143 @@ import httpx
 
 from design2code.settings import Settings
 from design2code.storage import get_input, json_encode
+
+
+async def generate_agent(settings: Settings, source_set: dict[str, Any], *,
+                         repair_context: str = "") -> tuple[str, dict[str, Any]]:
+    """Run the vendored screenshot-to-code Agent for one D2C request.
+
+    The upstream Agent currently emits one HTML file.  The adapter preserves
+    that exact output and wraps it into the existing React/Vite candidate so
+    the rest of the workbench can build, preview, inspect and export it.
+    """
+    from agent.runner import Agent
+    from fs_logging.agent_runs import AgentRunRecorder
+    from llm import Llm
+    from prompts.pipeline import build_prompt_messages
+    from prompts.prompt_types import UserTurnInput
+
+    images: list[str] = []
+    material_lines: list[str] = []
+    for source in source_set.get("sources", []):
+        if not isinstance(source, dict):
+            continue
+        item = get_input(str(source.get("input_id", "")))
+        if not item:
+            continue
+        kind = item.get("input_type")
+        raw_data = item.get("data")
+        data: dict[str, Any] = cast(dict[str, Any], raw_data) if isinstance(raw_data, dict) else {}
+        label = str(source.get("role") or kind or "资料")
+        if kind in {"screenshot", "figma"} and data.get("content_base64"):
+            mime = data.get("mime_type") or "image/png"
+            images.append(f"data:{mime};base64,{data['content_base64']}")
+            material_lines.append(f"- {label}：已附加为第 {len(images)} 张图片。")
+        elif kind == "spec":
+            material_lines.append(f"- {label}：\n{str(data.get('text', ''))[:40_000]}")
+        elif kind == "figma_bundle":
+            raw_files: list[Any] = cast(list[Any], data.get("files")) if isinstance(data.get("files"), list) else []
+            raw_assets: list[Any] = cast(list[Any], data.get("assets")) if isinstance(data.get("assets"), list) else []
+            names = [str(entry.get("path", "")) for entry in raw_files[:80]
+                     if isinstance(entry, dict)]
+            assets = [str(entry.get("path", "")) for entry in raw_assets[:30]
+                      if isinstance(entry, dict)]
+            material_lines.append(
+                f"- {label}：FigmaToCode 项目包源码参考 {names}；图片资源 {assets}。"
+            )
+
+    instructions = str(source_set.get("instructions", "")).strip()
+    authority_raw = source_set.get("authority_by_dimension")
+    authority: dict[str, str] = cast(dict[str, str], authority_raw) if isinstance(authority_raw, dict) else {}
+    brief = "\n".join(material_lines) or "- 未提供额外文字资料。"
+    prompt_text = f"""这是 Design2Code 工作台任务。请保留截图中的真实文字和布局。
+
+## 资料与来源优先级
+{brief}
+
+维度优先级：{json.dumps(authority, ensure_ascii=False)}
+用户指令：{instructions or '按参考资料生成可运行页面。'}
+"""
+    if repair_context:
+        prompt_text += f"\n## 本次修改要求\n{repair_context[:30_000]}\n"
+
+    input_mode = "image" if images else "text"
+    prompt: UserTurnInput = {"text": prompt_text, "images": images, "videos": []}
+    messages = await build_prompt_messages(
+        stack="html_css", input_mode=input_mode, generation_type="create",
+        prompt=prompt, history=[], image_generation_enabled=False,
+    )
+    events: list[dict[str, Any]] = []
+
+    async def send_message(msg_type: str, value: str | None, variant_index: int,
+                           data: dict[str, Any] | None, event_id: str | None) -> None:
+        if msg_type in {"toolStart", "toolResult"}:
+            name = (data or {}).get("name")
+            events.append({"type": msg_type, "name": name, "event_id": event_id,
+                           "ok": (data or {}).get("ok")})
+        elif msg_type == "variantError":
+            events.append({"type": msg_type, "message": (value or "")[:500]})
+
+    generation_id = f"d2c_{uuid.uuid4().hex[:16]}"
+    recorder = AgentRunRecorder(
+        generation_id=generation_id, variant_index=0, entry_point="design2code",
+        stack="html_css", input_mode=input_mode, generation_type="create", enabled=True,
+    )
+    agent = Agent(
+        send_message=send_message, variant_index=0,
+        openai_api_key=settings.api_key, openai_base_url=settings.base_url,
+        anthropic_api_key=None, gemini_api_key=None, replicate_api_key=None,
+        should_generate_images=False, should_extract_assets=False,
+        asset_base_url="", initial_file_state=None, option_codes=[], recorder=recorder,
+        max_turns=min(2, max(1, int(getattr(settings, "model_request_limit", 2)))),
+        # The upstream prompt asks for screenshot_preview after create_file,
+        # which requires a third provider turn to answer.  The workbench's
+        # hard two-request budget therefore disables that optional tool and
+        # reports the reason below; local Playwright inspection still runs
+        # after the candidate is built.
+        enable_screenshot_preview=False,
+    )
+    try:
+        html = await agent.run(Llm.GPT_6_LUNA_LOW, messages)
+    except Exception as exc:
+        # Agent.run finalizes its recorder before propagating. Keep the public
+        # error useful while never returning provider credentials.
+        raise ProviderError("AGENT_FAILED", f"上游 screenshot-to-code Agent 执行失败：{exc}", unknown=True) from exc
+
+    if not html.strip():
+        raise ProviderError("AGENT_EMPTY", "上游 Agent 未生成页面内容。")
+    # The upstream prompt intentionally produces a single HTML file.  Embed it
+    # as a React component without changing its markup, styles or handlers.
+    escaped = html.replace("`", "\\`").replace("${", "\\${")
+    app = ("import React, { useEffect, useRef } from 'react';\n"
+           "import './index.css';\n\n"
+           f"const markup = `{escaped}`;\n"
+           "export default function App() {\n"
+           "  const host = useRef<HTMLDivElement>(null);\n"
+           "  useEffect(() => {\n"
+           "    host.current?.querySelectorAll('script').forEach((node) => {\n"
+           "      const script = document.createElement('script');\n"
+           "      script.text = node.textContent || '';\n"
+           "      document.body.appendChild(script);\n"
+           "      script.remove();\n"
+           "    });\n"
+           "  }, []);\n"
+           "  return <div ref={host} className=\"d2c-agent-output\" dangerouslySetInnerHTML={{ __html: markup }} />;\n"
+           "}\n")
+    result: dict[str, Any] = {"files": [{"path": "src/App.tsx", "content": app},
+                         {"path": "src/index.css", "content": "html, body, #root { min-height: 100%; margin: 0; }\n"}],
+              "engine": "screenshot-to-code-agent",
+              "engine_version": "a8139779f7c5ae231b7f2a86fa7f83ddc5f7badc",
+              "generation_id": generation_id,
+              "agent_run_id": recorder.run_id,
+              "tools": events,
+              "tool_policy": {"screenshot_preview": "disabled_for_two_request_budget"},
+              "provider": "openai",
+              "model": settings.model,
+              "input_mode": input_mode,
+              "model_requests": max(1, int(getattr(recorder, "_step", 1))),
+              "repair_context": bool(repair_context)}
+    return json.dumps(result, ensure_ascii=False), result
 
 
 SYSTEM_PROMPT = """You create a React, TypeScript and Vite page from supplied design materials.
