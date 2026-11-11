@@ -25,11 +25,15 @@ def figma_seed(source_set: dict[str, Any]) -> dict[str, Any] | None:
                 files[path] = content
             if "src/App.tsx" not in files:
                 raise ValueError("FigmaToCode Vite 项目缺少可运行的 src/App.tsx。")
-            files.setdefault("src/index.css", "html, body, #root { margin: 0; min-height: 100%; }\n")
+            missing_css = "src/index.css" not in files
+            # The upstream absolute-layout root uses height:100%. Its generated
+            # <main> needs a definite viewport-height chain in the trusted shell.
+            files.setdefault("src/index.css", "html, body, #root { margin: 0; min-height: 100%; height: 100%; }\n#root > main { min-height: 100%; height: 100%; }\n")
             return {"input_id": item["input_id"], "artifact_hash": data.get("artifact", {}).get("artifact_hash"),
                     "converter_version": data.get("artifact", {}).get("converter_version"),
                     "files": files, "source_paths": source_paths,
-                    "warnings": ["沿用转换源码和资源；依赖、入口及构建配置采用受控 React/Vite 模板，原包保持不变。"]}
+                    "warnings": ["沿用转换源码和资源；依赖、入口及构建配置采用受控 React/Vite 模板，原包保持不变。"]
+                    + (["原包缺少 index.css：补齐视口高度链，防止百分比高度容器坍塌；原转换布局和图片尺寸保留，响应式效果需单独检查。"] if missing_css else [])}
     return None
 
 
