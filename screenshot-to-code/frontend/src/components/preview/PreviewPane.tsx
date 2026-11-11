@@ -38,6 +38,7 @@ interface ProjectPreviewProps {
   placeholder: ReactNode;
   actions?: ReactNode;
   selection?: ReactNode;
+  codeEditor?: ReactNode;
 }
 
 // The same upstream preview, tabs and CodeMirror now accept a built multi-file
@@ -72,9 +73,11 @@ export function ProjectPreviewPane(props: ProjectPreviewProps) {
       {props.url && props.selection}
     </TabsContent>)}
     <TabsContent value="code">
+      {props.codeEditor || <>
       <div className="d2c-file-tabs" role="group" aria-label="工程文件">{props.files.map((item, index) => <button type="button" key={item.path} aria-pressed={props.selectedFile === index} className={props.selectedFile === index ? "active" : ""} onClick={() => props.onFileChange(index)}>{item.path}</button>)}</div>
       <p className="d2c-help">当前候选源码（只读）。修改页面请使用下方的修改要求；导出内容与本次构建一致。</p>
       <CodeMirror key={file?.path} code={file?.content || ""} editorTheme={EditorTheme.COBALT} onCodeChange={() => {}} readOnly language={/\.html?$/.test(file?.path || "") ? "html" : "text"} label={`源码 ${file?.path || ""}`} className="d2c-native-code" />
+      </>}
     </TabsContent>
   </Tabs>;
 }

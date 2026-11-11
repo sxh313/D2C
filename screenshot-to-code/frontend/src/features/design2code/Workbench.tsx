@@ -4,6 +4,7 @@ import { buildSelectedElementInstruction } from "../../components/select-and-edi
 import "./workbench.css";
 import { FigmaArtifacts } from "./FigmaArtifacts";
 import { ProjectPreviewPane } from "../../components/preview/PreviewPane";
+import { ProjectCodeEditor } from "./ProjectCodeEditor";
 
 type ImageInput = { name: string; data: string };
 type Capabilities = { provider_configured: boolean; figma_mode: "mcp" | "rest"; figma_configured: boolean; generation_available: boolean; conversion_build_available?: boolean; configuration_issues: string[]; token_limit_configured: boolean; cost_limit_configured: boolean };
@@ -883,6 +884,9 @@ export default function D2CWorkbench() {
         {run && <div className="d2c-result-content">{awaitingRepairedCandidate && <p className="d2c-help" role="status">修改正在进行；当前显示的源码和检查结果属于修改前版本，新版本的构建与检查结果尚未完成。</p>}{run.status === "BUILDING" && run.result?.candidate_name === "candidate-2" && <p className="d2c-help" role="status">修改后的源码已保存，正在构建；检查结果尚未完成。</p>}{run.error && <div className="d2c-error">{run.error}</div>}{["FAILED", "CANCELLED"].includes(run.status) && !!run.result?.files?.length && <p className="d2c-help">任务未完成时，工程包可能不完整或无法运行；“下载已保存源码”仅包含模型源码，不包含完整工程、依赖或参考图片。请查看检查结果。</p>}{canRecoverPrevious && <section className="d2c-previous"><strong>修改后的工程未完成</strong><p>可以查看或下载修改前已构建通过的版本；下方检查结果属于本次修改。</p><button type="button" onClick={() => void showPreviousPreview()}>查看修改前页面</button> <a href={`${api}/runs/${run.run_id}/export?version=previous`}>下载修改前工程</a>{previousPreviewError && <p role="alert">{previousPreviewError}</p>}{previousPreview && <iframe title="修改前页面预览" className="d2c-preview" sandbox="allow-scripts allow-forms" src={previousPreview} />}</section>}{canPreview && !["READY_FOR_REVIEW", "COMPLETE_LOCAL"].includes(run.status) && <p className="d2c-help" role="status">当前显示的是此前构建通过的版本，本次修改未完成或结果未知。</p>}{failedChecks.length > 0 && <div className="d2c-error" role="alert">{awaitingRepairedCandidate ? "修改前版本有" : "有"} {failedChecks.length} 项检查失败，请查看检查结果后决定是否修改。 <a href="#d2c-check-results">查看失败项</a></div>}<div className="d2c-run-meta">任务 {run.run_id} <span>已占用模型请求额度 {run.model_requests} 次</span></div>{run.result?.engine && <p className="d2c-help">执行引擎：{run.result.engine} · 模型：{run.result.model || "未记录"} · 工具事件：{run.result.tools?.length || 0} 次{run.result.agent_run_id ? ` · Agent 记录 ${run.result.agent_run_id}` : ""}</p>}<p className="d2c-help">额度在请求准备时占用；预检失败或结果未知时，不能据此确认供应商是否收到请求或产生费用。</p><RunHistory key={run.run_id} runId={run.run_id} />{files.length > 0 ? <><ProjectPreviewPane
   key={run.run_id}
   url={preview} files={files} selectedFile={selectedFile} onFileChange={setSelectedFile}
+  codeEditor={<ProjectCodeEditor key={`${run.run_id}:${run.result?.candidate_name || "candidate"}`} runId={run.run_id}
+    enabled={!isRunning && !busy && !pendingRepair && !pendingRun && run.repairs < 1}
+    onSubmitted={async () => { setRun(await request<Run>(`/runs/${run.run_id}`)); setView("preview"); }} />}
   view={view} onViewChange={setView} frameRef={previewRef}
   onLoad={() => { setPreviewReady(true); setSelecting(false); setSelectedElement(null); selectionToken.current = ""; }}
   onRefresh={() => { setPreviewReady(false); setPreviewAttempt((attempt) => attempt + 1); }}

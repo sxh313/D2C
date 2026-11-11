@@ -20,6 +20,7 @@ from design2code.inputs import import_figma, import_figma_bundle, import_figma_m
 from design2code.figma_conversion import import_figma_conversion
 from design2code.inspection import capture_reference_viewport
 from design2code.runs import cancel_run, create_run, execute, execute_repair, parse_files, read_run, request_repair
+from design2code.code_edits import candidate_hash, execute_code_edit, request_code_edit
 from design2code.provider import ProviderError
 from design2code.runner import TEMPLATE, preview_url
 from design2code.settings import get_settings
@@ -297,6 +298,36 @@ async def get_run_events(run_id: str, after_seq: int = 0) -> dict[str, Any]:
                          "created_at": row["created_at"]} for row in rows]}
 
 
+class CodeEditFile(BaseModel):
+    path: str = Field(min_length=1, max_length=240)
+    content: str = Field(max_length=300_000)
+
+
+class CodeEditRequest(BaseModel):
+    base_candidate_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    files: list[CodeEditFile] = Field(min_length=1, max_length=40)
+
+
+@router.post("/runs/{run_id}/code-edit", status_code=202)
+async def edit_run_code(run_id: str, request: CodeEditRequest, background: BackgroundTasks,
+                        idempotency_key: str = Header(min_length=8, max_length=128)) -> dict[str, Any]:
+    created = request_code_edit(run_id, request.base_candidate_hash,
+                                [item.model_dump() for item in request.files], idempotency_key)
+    if created:
+        background.add_task(execute_code_edit, run_id)
+    return {"run_id": run_id, "accepted": True}
+
+
+@router.get("/runs/{run_id}/code-edit")
+async def get_editable_code(run_id: str) -> dict[str, Any]:
+    run = read_run(run_id)
+    if run is None:
+        raise HTTPException(404, "找不到该任务。")
+    return {"base_candidate_hash": candidate_hash(run["source_set_hash"], run["result"] or {}),
+            "files": (run["result"] or {}).get("files", []),
+            "editable": run["status"] in {"READY_FOR_REVIEW", "FAILED"} and run["repairs"] < get_settings().repair_limit}
+
+
 def _has_built_candidate(run: dict[str, Any]) -> bool:
     result: dict[str, Any] = run.get("result") or {}
     checks: list[dict[str, Any]] = result.get("checks", [])
@@ -313,8 +344,7 @@ def _can_preview(run: dict[str, Any]) -> bool:
 
 
 def _review_hash(source_hash: str, result: dict[str, Any]) -> str:
-    snapshot: dict[str, Any] = {"source_hash": source_hash, "candidate_name": result.get("candidate_name", "candidate"), "files": result.get("files", [])}
-    return hashlib.sha256(json_encode(snapshot).encode("utf-8")).hexdigest()
+    return candidate_hash(source_hash, result)
 
 
 class ManualReviewRequest(BaseModel):
@@ -566,6 +596,8 @@ async def export_run(run_id: str, version: Literal["current", "previous"] = "cur
                            or ((run.get("result") or {}).get("usage") or {}).get("tool_policy", {}),
             "repair_requests": run.get("repairs", 0),
             "project": (run.get("result") or {}).get("project"),
+            "revision": (run.get("result") or {}).get("revision"),
+            "origin": (run.get("result") or {}).get("origin"),
             "export_file_hashes": exported_files,
             "export_file_hash_scope": "candidate_files_excluding_report",
             "auto_retry_count": 0,
