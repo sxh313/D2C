@@ -887,6 +887,12 @@ export const duplicateWithOffsetInput = z.object({
 });
 
 export const toolInputSchemas = {
+  d2c_convert_selection: z.object({
+    fileKey: fileKeyField,
+    expectedNodeId: createFigmaNodeIdSchema(),
+    request_id: z.string().regex(/^d2c_[a-f0-9]{32}$/),
+    outputFormat: z.enum(["vite"]).default("vite"),
+  }),
   get_document: z.object({
     fileKey: fileKeyField,
   }),
@@ -1313,6 +1319,7 @@ const rpcToArgs: Record<
   ToolName,
   (nodeIds?: string[], params?: Record<string, unknown>) => unknown
 > = {
+  d2c_convert_selection: (_nodeIds, params) => ({ ...params }),
   get_document: (_nodeIds, params) => ({ ...params }),
   get_selection: (_nodeIds, params) => ({ ...params }),
   get_layout_tree: (nodeIds, params) => ({ ...params, rootId: nodeIds?.[0] }),

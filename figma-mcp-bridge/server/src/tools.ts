@@ -111,6 +111,13 @@ interface SaveScreenshotItemResult {
  */
 export function registerTools(server: McpServer, node: Node, port: number): void {
   server.tool(
+    "d2c_convert_selection",
+    "Convert the currently selected frame using the vendored FigmaToCode plugin export pipeline. Returns real Vite ZIP bytes; does not call a model.",
+    toolInputSchemas.d2c_convert_selection.shape,
+    async ({ fileKey, ...params }): Promise<ToolResult> =>
+      renderResponse(() => node.sendWithParams("d2c_convert_selection", undefined, params, fileKey))
+  );
+  server.tool(
     "list_files",
     "List all currently connected Figma/FigJam files. Returns fileKey and fileName for each. Use the fileKey to target a specific file in other tools.",
     async (): Promise<ToolResult> => {

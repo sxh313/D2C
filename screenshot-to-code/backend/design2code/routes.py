@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from PIL import Image, ImageChops, ImageEnhance, ImageStat, UnidentifiedImageError
 
 from design2code.inputs import import_figma, import_figma_bundle, import_figma_mcp, import_image, import_spec
+from design2code.figma_conversion import import_figma_conversion
 from design2code.inspection import capture_reference_viewport
 from design2code.runs import cancel_run, create_run, execute, execute_repair, parse_files, read_run, request_repair
 from design2code.provider import ProviderError
@@ -71,7 +72,7 @@ async def capabilities() -> dict[str, object]:
 
 
 class InputRequest(BaseModel):
-    input_type: Literal["screenshot", "spec", "figma", "figma_bundle"]
+    input_type: Literal["screenshot", "spec", "figma", "figma_bundle", "figma_code"]
     content: str = Field(max_length=14_000_000)
     name: str = "screenshot.png"
 
@@ -84,6 +85,8 @@ async def create_input(request: InputRequest) -> dict[str, Any]:
         return import_spec(request.content)
     if request.input_type == "figma_bundle":
         return import_figma_bundle(request.content, request.name)
+    if request.input_type == "figma_code":
+        return await import_figma_conversion(request.content)
     settings = get_settings()
     use_mcp = getattr(settings, "figma_mode", "rest") == "mcp" and hasattr(settings, "figma_bridge_client")
     return await import_figma_mcp(request.content) if use_mcp else await import_figma(request.content)
@@ -94,8 +97,18 @@ async def read_input(input_id: str) -> dict[str, Any]:
     item = get_input(input_id)
     if item is None:
         raise HTTPException(404, "找不到该资料。")
-    data = {k: v for k, v in item["data"].items() if k not in {"content_base64", "node_data", "files", "assets"}}
+    data = {k: v for k, v in item["data"].items() if k not in {"content_base64", "archive_base64", "node_data", "files", "assets"}}
     return {**item, "data": data, "status": "READY"}
+
+
+@router.get("/design-inputs/{input_id}/artifact-archive")
+async def download_artifact_archive(input_id: str) -> StreamingResponse:
+    item = get_input(input_id)
+    if not item or item["input_type"] != "figma_bundle" or not item["data"].get("archive_base64"):
+        raise HTTPException(404, "该资料没有保存原始转换项目包（历史资料不会被补造）。")
+    output = io.BytesIO(base64.b64decode(item["data"]["archive_base64"], validate=True))
+    return StreamingResponse(output, media_type="application/zip",
+                             headers={"Content-Disposition": 'attachment; filename="figma-source.zip"'})
 
 
 class SourceReference(BaseModel):
@@ -160,7 +173,8 @@ async def create_source_set(request: SourceSetRequest) -> dict[str, Any]:
     sources = []
     for ref, item in zip(request.sources, inputs):
         assert item is not None
-        sources.append({**ref.model_dump(), "input_type": item["input_type"], "source_hash": item["source_hash"]})
+        sources.append({**ref.model_dump(), "input_type": item["input_type"], "source_hash": item["source_hash"],
+                        "artifact": item["data"].get("artifact")})
     data: dict[str, Any] = {**request.model_dump(), "sources": sources, "confirmed": False}
     digest = hashlib.sha256(json_encode(data).encode("utf-8")).hexdigest()
     set_id = identifier("srcset")

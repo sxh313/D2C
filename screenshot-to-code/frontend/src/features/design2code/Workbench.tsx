@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { LuArrowUpRight, LuClipboardPaste, LuFileCode, LuImagePlus, LuLayers, LuPlus, LuRefreshCw, LuX } from "react-icons/lu";
 import { buildSelectedElementInstruction } from "../../components/select-and-edit/utils";
 import "./workbench.css";
+import { FigmaArtifacts } from "./FigmaArtifacts";
 
 type ImageInput = { name: string; data: string };
 type Capabilities = { provider_configured: boolean; figma_mode: "mcp" | "rest"; figma_configured: boolean; generation_available: boolean; configuration_issues: string[]; token_limit_configured: boolean; cost_limit_configured: boolean };
@@ -69,7 +70,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   catch { throw new NetworkError("无法连接本机服务，请检查网络和工作台是否正在运行。"); }
   if (!response.ok) {
     const problem = await response.json().catch(() => ({}));
-    throw new HttpError(response.status, typeof problem.detail === "string" ? problem.detail : `请求失败 (${response.status})`);
+    throw new HttpError(response.status, typeof problem.detail === "string" ? problem.detail :
+      typeof problem.detail?.message === "string" ? `[${problem.detail.code}] ${problem.detail.message}` : `请求失败 (${response.status})`);
   }
   return response.json() as Promise<T>;
 }
@@ -270,6 +272,7 @@ export default function D2CWorkbench() {
   const [dialogRule, setDialogRule] = useState<DialogRule>(emptyDialogRule);
   const [tabRule, setTabRule] = useState<TabRule>(emptyTabRule);
   const [figma, setFigma] = useState("");
+  const [figmaReferenceOnly, setFigmaReferenceOnly] = useState(false);
   const [figmaConnection, setFigmaConnection] = useState("");
   const [figmaChecking, setFigmaChecking] = useState(false);
   const [bundle, setBundle] = useState<ImageInput | null>(null);
@@ -615,7 +618,7 @@ export default function D2CWorkbench() {
         sourceIds.spec = item.input_id;
       }
       if (figma.trim()) {
-        const item = await request<{ input_id: string }>("/design-inputs", jsonPost({ input_type: "figma", content: figma.trim() }));
+        const item = await request<{ input_id: string }>("/design-inputs", jsonPost({ input_type: figmaReferenceOnly ? "figma" : "figma_code", content: figma.trim() }));
         sources.push({ input_id: item.input_id, role: "structure_reference", scope: { page: "page" }, required: true });
         sourceIds.figma = item.input_id;
       }
@@ -805,7 +808,9 @@ export default function D2CWorkbench() {
         <label className="d2c-label" htmlFor="d2c-figma">Figma 节点链接 <span>{!capabilities ? "正在检查配置" : capabilities.figma_mode === "mcp" ? (capabilities.figma_configured ? "MCP 模式；请在 Figma 中运行插件" : "请先安装 MCP Bridge") : (capabilities.figma_configured ? "REST 令牌已配置" : "需要配置访问令牌")}</span></label><input id="d2c-figma" value={figma} onChange={(event) => setFigma(event.target.value)} placeholder="https://www.figma.com/design/…?node-id=…" />
         {capabilities?.figma_mode === "mcp" && <div className="d2c-help"><button type="button" disabled={figmaChecking} onClick={() => void checkFigmaConnection()}>{figmaChecking ? "正在检查…" : "检查 Figma 插件连接"}</button>{figmaConnection && <p role="status">{figmaConnection}</p>}</div>}
         {capabilities?.figma_mode === "mcp" && <details className="d2c-advanced"><summary>插件已连接，但无法导入？</summary><div className="d2c-help"><p>开发插件重新运行后，可能需要重新关联文件：</p><ol><li>在 Figma Desktop 打开要导入的文件，运行 MCP Bridge 插件，并确认只连接了一个插件会话。</li><li>在项目根目录打开 PowerShell，输入 <code>.\Bind-FigmaBridge.ps1</code> 并回车。</li><li>出现 <code>FigmaUrl:</code> 提示时，粘贴当前文件的 Figma 链接并回车。请确认链接对应 Figma 中打开的文件。</li><li>显示绑定成功后，保持插件打开，在上方填写带节点标识的链接，再重新导入。</li></ol><p>如果连接了多个插件会话，脚本会列出会话并提示使用 <code>-SessionKey</code> 指定；请根据当前文件确认后再绑定。</p></div></details>}
-        <details className="d2c-advanced"><summary>更多参考资料：FigmaToCode 项目包</summary><p className="d2c-help">在 FigmaToCode 中选择 HTML 或 Tailwind，再下载 Vite、Next.js 或 HTML 项目 ZIP。Flutter 和 SwiftUI 导出不适用于此处。项目源码和图片仅作为生成参考，不会执行包内脚本。</p><label className="d2c-label" htmlFor="d2c-bundle">FigmaToCode 项目包 <span>可选 ZIP，最多 10 MiB</span></label>
+        <label className="d2c-help"><input type="checkbox" checked={figmaReferenceOnly} onChange={(event) => setFigmaReferenceOnly(event.target.checked)} /> 仅读取节点/截图参考（旧流程，不执行 FigmaToCode 转换）</label>
+        <p className="d2c-help">默认使用 FigmaToCode 真实转换：运行新版 Bridge 插件，并选中链接对应的唯一画板。没有会话时可使用下方项目包。两种入口生成同一种带版本、源码与图片哈希的产物。</p>
+        <details className="d2c-advanced"><summary>导入 FigmaToCode 项目包</summary><p className="d2c-help">在 FigmaToCode 中选择 HTML 或 Tailwind，再下载 Vite、Next.js 或 HTML 项目 ZIP。Flutter 和 SwiftUI 导出不适用于此处。保留转换源码和图片供同一次 Agent 融合，不会执行包内脚本；旧 ZIP 无版本信息时如实标记未知。</p><label className="d2c-label" htmlFor="d2c-bundle">FigmaToCode 项目包 <span>可选 ZIP，最多 10 MiB</span></label>
         <input id="d2c-bundle" type="file" accept=".zip,application/zip" onChange={(event) => {
           const file = event.target.files?.[0];
           event.target.value = "";
@@ -851,6 +856,7 @@ export default function D2CWorkbench() {
         }}>清空当前资料</button>
         {pendingRun && <div className="d2c-error" role="status"><strong>有一项任务的创建结果待确认</strong><p>恢复会使用原来的请求标识；如果请求尚未到达服务端，恢复会创建任务并可能调用模型。</p><button type="button" disabled={busy} onClick={() => void recoverPendingRun()}>恢复任务创建</button> <button type="button" disabled={busy} onClick={discardPendingRun}>放弃恢复</button><p>放弃只清除本机恢复记录，不会停止可能已创建的任务；请先查看最近的本机任务。</p></div>}
         <button className="d2c-generate" disabled={isRunning || !!pendingRun || !!pendingRepair || imageReads > 0 || bundleReading || !capabilities?.generation_available} onClick={() => void handleGenerate()}>{isRunning ? <><LuRefreshCw className="d2c-spin" /> 正在处理</> : <>确认资料并生成 <LuArrowUpRight /></>}</button>
+        {run && <FigmaArtifacts key={run.run_id} runId={run.run_id} />}
         {run && ["CREATED", "GENERATING", "BUILDING", "REPAIRING"].includes(run.status) && <button type="button" disabled={busy} onClick={() => void handleStop()}>停止当前任务</button>}
         {!capabilities?.generation_available && <div className="d2c-help" role="status">
           <p>{connectionError || (!capabilities ? "正在检查本机服务…" : "生成暂不可用，请检查以下配置和依赖。")}</p>

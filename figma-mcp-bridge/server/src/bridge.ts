@@ -88,7 +88,7 @@ export class Bridge {
       try {
         const resp: BridgeResponse = JSON.parse(data.toString());
         const pending = this.pending.get(resp.requestId);
-        if (pending) {
+        if (pending && pending.ws === ws) {
           clearTimeout(pending.timeout);
           this.pending.delete(resp.requestId);
           pending.resolve(resp);

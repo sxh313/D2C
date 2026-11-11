@@ -21,6 +21,7 @@ from PIL import Image, UnidentifiedImageError
 from dotenv import dotenv_values
 
 from design2code.settings import ENV_FILE, get_settings
+from design2code.figma_artifact import create_artifact
 from design2code.storage import connect, identifier, json_encode, now
 
 
@@ -29,7 +30,7 @@ def save_input(kind: str, data: dict[str, Any], digest: str) -> dict[str, Any]:
     with connect() as db:
         db.execute("INSERT INTO inputs VALUES (?, ?, ?, ?, ?)",
                    (input_id, kind, digest, json_encode(data), now()))
-    public_data = {k: v for k, v in data.items() if k not in {"content_base64", "node_data", "files", "assets"}}
+    public_data = {k: v for k, v in data.items() if k not in {"content_base64", "archive_base64", "node_data", "files", "assets"}}
     return {"input_id": input_id, "input_type": kind, "source_hash": digest,
             "status": "READY", "data": public_data}
 
@@ -41,7 +42,8 @@ def import_spec(content: str) -> dict[str, Any]:
     return save_input("spec", {"text": content}, hashlib.sha256(content.encode("utf-8")).hexdigest())
 
 
-def import_figma_bundle(encoded: str, name: str) -> dict[str, Any]:
+def import_figma_bundle(encoded: str, name: str, *,
+                        conversion: dict[str, Any] | None = None) -> dict[str, Any]:
     if encoded.startswith("data:") and "," in encoded:
         encoded = encoded.split(",", 1)[1]
     if len(encoded) > 14_000_000:
@@ -111,7 +113,8 @@ def import_figma_bundle(encoded: str, name: str) -> dict[str, Any]:
                             image.verify()
                     except (UnidentifiedImageError, OSError, SyntaxError, Image.DecompressionBombError) as exc:
                         raise HTTPException(422, "项目包图片无法读取。") from exc
-                    assets.append({"path": f"images/{output_name}", "content_base64": base64.b64encode(content).decode("ascii")})
+                    assets.append({"path": f"images/{output_name}", "source_path": path,
+                                   "content_base64": base64.b64encode(content).decode("ascii")})
                 else:
                     ignored += 1
     except (zipfile.BadZipFile, RuntimeError, OSError, EOFError, zlib.error, NotImplementedError) as exc:
@@ -124,6 +127,9 @@ def import_figma_bundle(encoded: str, name: str) -> dict[str, Any]:
                             "asset_count": len(assets), "ignored_count": ignored,
                             "warning": "源码作为生成参考，包内依赖和脚本不会执行；需要另行提供参考截图以检查视觉。",
                             "files": files, "assets": assets}
+    data["artifact"] = create_artifact(data, raw, conversion)
+    # Preserve the exact project, including files not accepted for execution.
+    data["archive_base64"] = base64.b64encode(raw).decode("ascii")
     return save_input("figma_bundle", data, hashlib.sha256(raw).hexdigest())
 
 

@@ -2,6 +2,7 @@ import { serializeNode } from "./serializer";
 import type { SerializableNode } from "./serializer";
 import { addLayersToFrame } from "../html-figma/figma";
 import { getPrototypeConnections, scanPrototype, tracePrototypeFlow } from "./prototype";
+import { convertSelectionWithFigmaToCode } from "./figmaToCode";
 
 type RequestType =
   | "get_document"
@@ -15,6 +16,7 @@ type RequestType =
   | "get_design_context"
   | "get_variable_defs"
   | "get_screenshot"
+  | "d2c_convert_selection"
   | "set_node_visibility"
   | "set_text_content"
   | "set_text_properties"
@@ -82,6 +84,9 @@ type ServerRequestParams = Record<string, unknown> & {
   track?: any;
   timelineId?: string;
   duration?: number;
+  outputFormat?: "html" | "nextjs" | "vite";
+  expectedNodeId?: string;
+  request_id?: string;
 };
 
 type ServerRequest = {
@@ -525,6 +530,31 @@ const handleRequest = async (request: ServerRequest): Promise<PluginResponse> =>
           requestId: request.requestId,
           data: figma.currentPage.selection.map((node) => serializeNode(node)),
         };
+      case "d2c_convert_selection": {
+        const selection = [...figma.currentPage.selection];
+        if (!selection.length) throw new Error("EMPTY_SELECTION");
+        if (request.params?.expectedNodeId &&
+            (selection.length !== 1 || selection[0].id !== request.params.expectedNodeId)) {
+          throw new Error("SELECTION_MISMATCH");
+        }
+        const result = await convertSelectionWithFigmaToCode(
+          selection,
+          request.params?.outputFormat ?? "vite",
+        );
+        return { type: request.type, requestId: request.requestId, data: {
+          kind: "figma-to-code",
+          request_id: request.params?.request_id ?? request.requestId,
+          transport: "desktop_bridge",
+          fileKey: getFileKey(),
+          nodeIds: result.nodeIds,
+          nodeNames: result.nodeNames,
+          converter: result.converter,
+          converterVersion: result.converterVersion,
+          format: result.format,
+          warnings: result.warnings,
+          zipBase64: result.zipBase64,
+        } };
+      }
       case "get_layout_tree": {
         const rootId = request.nodeIds?.[0];
         if (!rootId) throw new Error("rootId is required");
