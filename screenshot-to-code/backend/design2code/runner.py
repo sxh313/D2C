@@ -197,7 +197,9 @@ def build_candidate(run_id: str, files: list[dict[str, str]], candidate_name: st
     for item in files:
         target = candidate.joinpath(*item["path"].split("/"))
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(item["content"], encoding="utf-8")
+        # Avoid Windows newline translation: source-text hashes must also
+        # describe the exact bytes written into new candidates and exports.
+        target.write_bytes(item["content"].encode("utf-8"))
     for args in ([pnpm, "install", "--frozen-lockfile", "--ignore-scripts", "--registry=https://registry.npmjs.org"],
                  [pnpm, "run", "build"]):
         outcome = _run_build_command(run_id, args, candidate, settings.build_timeout)

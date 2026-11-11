@@ -71,6 +71,7 @@ class AgentEngine:
         max_turns: int = 30,
         enable_screenshot_preview: bool = True,
         request_policy: Optional[RequestPolicy] = None,
+        project_files: Optional[Dict[str, str]] = None,
     ):
         self.send_message = send_message
         self.variant_index = variant_index
@@ -104,6 +105,7 @@ class AgentEngine:
             asset_base_url=asset_base_url,
             option_codes=option_codes,
             allowed_tools=request_policy.allowed_tools if request_policy else None,
+            project_files=project_files,
         )
         self._tool_preview_lengths: Dict[str, int] = {}
 
@@ -370,6 +372,7 @@ class AgentEngine:
             recorder=self.recorder,
             screenshot_enabled=self.enable_screenshot_preview,
             request_policy=self.request_policy,
+            project_mode=self.tool_runtime.project_files is not None,
         )
         try:
             result = await self._run_with_session(session)

@@ -190,6 +190,7 @@ def canonical_tool_definitions(
     image_editing_enabled: bool = True,
     asset_extraction_enabled: bool = True,
     screenshot_enabled: bool = True,
+    project_mode: bool = False,
 ) -> List[CanonicalToolDefinition]:
     tools: List[CanonicalToolDefinition] = [
         CanonicalToolDefinition(
@@ -210,6 +211,21 @@ def canonical_tool_definitions(
             parameters=_edit_schema(),
         ),
     ]
+    if project_mode:
+        tools = [CanonicalToolDefinition(
+            name=tool.name,
+            description=("Write one React/TypeScript/CSS source file in the existing project. "
+                         "Supply its exact src/ path and full content. Preserve unrelated files and assets."
+                         if tool.name == "create_file" else
+                         "Edit one existing project source file using exact string replacements. "
+                         "Supply its exact src/ path. Preserve unrelated files and assets."),
+            parameters={**tool.parameters,
+                        "properties": {**tool.parameters["properties"],
+                                       "path": {"type": "string", "description": "Exact src/ project source path."},
+                                       **({"content": {"type": "string", "description": "Full source text of this file."}}
+                                          if tool.name == "create_file" else {})},
+                        "required": list(dict.fromkeys(["path", *tool.parameters.get("required", [])]))},
+        ) for tool in tools]
     if image_generation_enabled:
         tools.append(
             CanonicalToolDefinition(

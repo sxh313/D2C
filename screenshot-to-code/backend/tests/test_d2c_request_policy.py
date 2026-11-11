@@ -27,7 +27,8 @@ async def sink(*_args: Any, **_kwargs: Any) -> None:
     pass
 
 
-def sdk_transport(monkeypatch: pytest.MonkeyPatch, *, fail: bool = False) -> list[dict[str, Any]]:
+def sdk_transport(monkeypatch: pytest.MonkeyPatch, *, fail: bool = False,
+                  tools: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     sent: list[dict[str, Any]] = []
 
     async def handle(request: httpx.Request) -> httpx.Response:
@@ -37,9 +38,10 @@ def sdk_transport(monkeypatch: pytest.MonkeyPatch, *, fail: bool = False) -> lis
         item: dict[str, Any] = {"id": "fc_test", "call_id": "call_test", "type": "function_call",
                 "name": "create_file", "arguments": json.dumps({"path": "index.html",
                 "content": "<html><body><h1>Tool output</h1></body></html>"})}
-        event: dict[str, Any] = {"type": "response.output_item.done", "output_index": 0, "item": item}
+        events: list[dict[str, Any]] = [{"type": "response.output_item.done", "output_index": index, "item": call}
+                                        for index, call in enumerate(tools if tools is not None else [item])]
         return httpx.Response(200, headers={"content-type": "text/event-stream"},
-                             content=f"data: {json.dumps(event)}\n\ndata: [DONE]\n\n")
+                             content="".join(f"data: {json.dumps(event)}\n\n" for event in events) + "data: [DONE]\n\n")
 
     def client(**kwargs: Any) -> AsyncOpenAI:
         assert kwargs["max_retries"] == 0

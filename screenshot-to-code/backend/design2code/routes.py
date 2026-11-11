@@ -51,6 +51,8 @@ async def figma_connection() -> dict[str, Any]:
 @router.get("/capabilities")
 async def capabilities() -> dict[str, object]:
     settings = get_settings()
+    build_available = ((TEMPLATE / "pnpm-lock.yaml").is_file()
+                       and bool(shutil.which("pnpm.cmd") or shutil.which("pnpm")))
     return {
         "provider_configured": settings.model_ready,
         "model": settings.model,
@@ -65,8 +67,8 @@ async def capabilities() -> dict[str, object]:
         "agent_engine": "screenshot-to-code-agent",
         "configuration_issues": list(settings.issues),
         "generation_available": settings.model_ready and settings.token_limit is None
-        and settings.cost_limit_micro_usd is None and (TEMPLATE / "pnpm-lock.yaml").is_file()
-        and bool(shutil.which("pnpm.cmd") or shutil.which("pnpm")),
+        and settings.cost_limit_micro_usd is None and build_available,
+        "conversion_build_available": build_available,
         "figma_import_available": bool((getattr(settings, "figma_mode", "rest") == "mcp" and getattr(settings, "figma_bridge_client", None) and settings.figma_bridge_client.is_file()) or getattr(settings, "figma_token", "")),
     }
 
@@ -531,6 +533,7 @@ async def export_run(run_id: str, version: Literal["current", "previous"] = "cur
         review_row = db.execute("SELECT data_json, created_at FROM manual_reviews WHERE run_id=? AND candidate_hash=?", (run_id, candidate_hash)).fetchone()
     manual_review: dict[str, Any] | None = {**json.loads(review_row["data_json"]), "created_at": review_row["created_at"]} if review_row else None
     output = io.BytesIO()
+    exported_files: list[dict[str, str]] = []
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         has_readme = (candidate / "README.md").is_file() and not (candidate / "README.md").is_symlink()
         original_report = candidate / "report.json"
@@ -543,6 +546,8 @@ async def export_run(run_id: str, version: Literal["current", "previous"] = "cur
             rel = path.relative_to(candidate)
             if path.is_file() and not path.is_symlink() and not ({"node_modules", "dist", ".git"} & set(rel.parts)) and path.name != ".env" and rel.as_posix() != "report.json":
                 archive.write(path, f"design2code-page/{rel.as_posix()}")
+                exported_files.append({"path": rel.as_posix(),
+                                       "content_hash": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()})
         if not has_readme:
             archive.writestr("design2code-page/README.md", "# Design2Code 页面\n\n使用 Node.js 和 pnpm，运行 `pnpm install --frozen-lockfile`，再运行 `pnpm dev`。\n")
         archive.writestr("design2code-page/report.json", json_encode({
@@ -560,6 +565,9 @@ async def export_run(run_id: str, version: Literal["current", "previous"] = "cur
             "tool_policy": (run.get("result") or {}).get("tool_policy")
                            or ((run.get("result") or {}).get("usage") or {}).get("tool_policy", {}),
             "repair_requests": run.get("repairs", 0),
+            "project": (run.get("result") or {}).get("project"),
+            "export_file_hashes": exported_files,
+            "export_file_hash_scope": "candidate_files_excluding_report",
             "auto_retry_count": 0,
             "checks": (run["result"] or {}).get("checks", []),
             "candidate_review_hash": candidate_hash, "manual_review": manual_review,

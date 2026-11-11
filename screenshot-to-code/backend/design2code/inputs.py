@@ -83,7 +83,7 @@ def import_figma_bundle(encoded: str, name: str, *,
                 if entry.file_size > 2 * 1024 * 1024 or (entry.compress_size and entry.file_size > 250 * entry.compress_size):
                     raise HTTPException(413, "项目包中存在过大或压缩比例异常的文件。")
                 ext = PurePosixPath(path).suffix.lower()
-                if ext in {".html", ".tsx", ".jsx", ".css"} and not any(p.casefold() in {"node_modules", "dist", ".git"} for p in parts):
+                if ext in {".html", ".tsx", ".ts", ".jsx", ".js", ".css"} and not any(p.casefold() in {"node_modules", "dist", ".git"} for p in parts):
                     content = archive.read(entry)
                     source_bytes += len(content)
                     if source_bytes > 300_000:
@@ -125,7 +125,7 @@ def import_figma_bundle(encoded: str, name: str, *,
     kind = "vite" if "src/App.tsx" in paths else "nextjs" if "app/page.tsx" in paths else "html" if any(path.endswith("index.html") for path in paths) else "other"
     data: dict[str, Any] = {"name": name[:255], "format": kind, "file_count": len(files),
                             "asset_count": len(assets), "ignored_count": ignored,
-                            "warning": "源码作为生成参考，包内依赖和脚本不会执行；需要另行提供参考截图以检查视觉。",
+                            "warning": "Vite 转换源码与图片可以直接构建或按需求修改；运行采用受控依赖和入口，原包另行保留。HTML/Next.js 仍为参考导入；视觉需要核对。",
                             "files": files, "assets": assets}
     data["artifact"] = create_artifact(data, raw, conversion)
     # Preserve the exact project, including files not accepted for execution.

@@ -18,6 +18,7 @@ from image_generation.replicate import (
 from uploaded_assets.tools import run_save_assets
 
 from agent.state import AgentFileState, ensure_str
+from agent.project import is_project_file
 from agent.tools.types import ToolCall, ToolExecutionResult, ToolMultimodalPart
 from agent.tools.summaries import summarize_text
 
@@ -39,6 +40,7 @@ class AgentToolRuntime:
         user_id: Optional[str] = None,
         option_codes: Optional[List[str]] = None,
         allowed_tools: Optional[frozenset[str]] = None,
+        project_files: Optional[Dict[str, str]] = None,
     ):
         self.file_state = file_state
         self.should_generate_images = should_generate_images
@@ -51,6 +53,8 @@ class AgentToolRuntime:
         self.user_id = user_id
         self.option_codes = option_codes or []
         self.allowed_tools = allowed_tools
+        self.project_files = dict(project_files) if project_files is not None else None
+        self.project_writes: List[str] = []
 
     def _effective_replicate_api_key(self) -> str | None:
         return self.replicate_api_key or REPLICATE_API_KEY
@@ -74,8 +78,12 @@ class AgentToolRuntime:
             )
 
         if tool_call.name == "create_file":
+            if self.project_files is not None:
+                return self._project_operation(tool_call)
             return self._create_file(tool_call.arguments)
         if tool_call.name == "edit_file":
+            if self.project_files is not None:
+                return self._project_operation(tool_call)
             return self._edit_file(tool_call.arguments)
         if tool_call.name == "generate_images":
             return await self._generate_images(tool_call.arguments)
@@ -116,7 +124,7 @@ class AgentToolRuntime:
                 summary={"error": "Missing content"},
             )
 
-        extracted = extract_html_content(content)
+        extracted = extract_html_content(content) if self.project_files is None else ""
         self.file_state.path = path
         self.file_state.content = extracted or content
 
@@ -138,6 +146,31 @@ class AgentToolRuntime:
             summary=summary,
             updated_content=self.file_state.content,
         )
+
+    def _project_operation(self, tool_call: ToolCall) -> ToolExecutionResult:
+        """Route upstream create/edit algorithms to the requested project file."""
+        assert self.project_files is not None
+        path = tool_call.arguments.get("path")
+        if (not isinstance(path, str) or not is_project_file(path)
+                or (path not in self.project_files and len(self.project_files) >= 40)):
+            return ToolExecutionResult(False, {"error": "Invalid or reserved project path."},
+                                       {"error": "PROJECT_PATH_REJECTED"})
+        previous_path, previous_content = self.file_state.path, self.file_state.content
+        self.file_state.path = path
+        self.file_state.content = self.project_files.get(path, "")
+        if tool_call.name == "create_file":
+            result = self._create_file(tool_call.arguments)
+        else:
+            result = self._edit_file(tool_call.arguments)
+        if result.ok and len(self.file_state.content.encode("utf-8")) <= 300_000:
+            self.project_files[path] = self.file_state.content
+            self.project_writes.append(path)
+            return result
+        self.file_state.path, self.file_state.content = previous_path, previous_content
+        if result.ok:
+            return ToolExecutionResult(False, {"error": "Project file exceeds 300 KB."},
+                                       {"error": "PROJECT_FILE_TOO_LARGE"})
+        return result
 
     @staticmethod
     def _generate_diff(old_content: str, new_content: str, path: str) -> Dict[str, Any]:

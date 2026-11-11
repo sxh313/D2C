@@ -30,6 +30,7 @@ def create_provider_session(
     recorder: Optional[AgentRunRecorder] = None,
     screenshot_enabled: Optional[bool] = None,
     request_policy: Optional[RequestPolicy] = None,
+    project_mode: bool = False,
 ) -> ProviderSession:
     if request_policy is not None and model not in OPENAI_MODELS:
         raise ValueError("Bounded request policy currently requires the OpenAI provider.")
@@ -42,6 +43,7 @@ def create_provider_session(
         # screenshot_preview needs headless Chromium; skip it if it can't launch.
         screenshot_enabled=(is_screenshot_preview_available()
                             if screenshot_enabled is None else screenshot_enabled),
+        project_mode=project_mode,
     )
 
     if request_policy is not None:

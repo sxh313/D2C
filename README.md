@@ -24,9 +24,22 @@ npm run build
 
 在 Figma Desktop 导入 `figma-mcp-bridge/plugin/manifest.json`。插件重新启动后，若开发环境无真实 fileKey，按现有 `Bind-FigmaBridge.ps1` 流程绑定当前文件。
 
-本次证据边界：新增契约测试通过；保存的真实单图插件包重新导入后在隔离目录实际构建并读取图片通过（不调用模型）。
-Bridge 和前端可构建，FigmaToCode 原 ZIP 测试 10 项通过。当前 Bridge 无会话，实时节点转换和新三资料模型验收未执行。
+## 转换工程保留与本次验证（2026-11-11）
+
+- React/Vite Figma Artifact 作为可运行的 TSX 多文件工程起点。官方 Agent 的 `create_file` / `edit_file` 依原工具算法修改指定源码文件，未修改的文件保留；原始 ZIP 单独保存。
+- 单独 Figma 且没有附加指令时直接构建，模型调用为 0 次。图片 URL 为本地嵌套预览规范化，依赖、入口和构建配置使用受控 React 18 / Vite / Tailwind 3 模板。Tailwind 4 样式暂不支持，HTML/Next 包仍为参考输入，不能声称兼容所有上游输出。
+- 保存 Artifact → 工程源码 → 候选的文件关系与文本哈希；导出报告另含候选实际文件字节哈希，以识别历史 Windows 换行差异。新候选源码直接以 UTF-8 字节写入。
+- 每 Run 最多 2 次模型请求、1 次修复、无自动重试。首轮与修复分别最多一次供应商请求，关闭会额外调用供应商的工具；文件工具执行后未追加模型读取反馈，完整 Agent 反馈闭环标记未执行。
+- 真实保存的插件包零调用构建：`run_084fe1b0dfa3437db6e626982826938f`。
+- 真实图片 + 保存的插件包 + Spec 联合生成：`run_2c121f0a34df4291bfa86e263b209b12`，使用官方 Agent 和配置模型，首轮 1 次、修复 1 次。首轮缺样式且弹窗存在同名关闭按钮，唯一一次修复后构建、搜索与弹窗检查通过。
+- 上述联合工程导出到干净目录，实际执行 `pnpm install --frozen-lockfile --ignore-scripts`、`pnpm build` 和本地 Vite preview。实际操作搜索、状态筛选、组合筛选空状态、空值错误、有效提交和弹窗关闭通过；桌面和手机视口无横向溢出，图片已加载。依赖安装复用了本机 pnpm 缓存，不等于全新机器验证。
+- 已自行启动 Figma Desktop 和现有 Bridge 开发插件，绑定真实文件并从工作台完成选区直连：`run_b8bf8b28ba9344fb859d5925d9d10485`。来源为 `plugin_execution`、传输为 `desktop_bridge`，带本次 request_id 和原转换器版本；该 Run 0 次模型请求，构建和导出后干净目录安装/构建通过。这次选区是单图画板，不代表多节点设计的完整验收。
+
+Python 全量测试本阶段 404 通过、2 跳过；前端 lint 和生产构建通过。FigmaToCode 原 ZIP 测试历史为 10 项通过。
 Bridge 全量类型检查仍报告 99 个上游 backend 源码类型错误；Python 全量类型检查也有历史测试文件错误，不能宣称全量静态检查通过。
+本阶段 Python 全量类型检查为 6 个错误、54 个警告，工程适配核心改动的定向检查为 0 错误、0 警告。
+
+当前首页仍为中文 `Workbench.tsx`；以 screenshot-to-code 原生前端工作流为基础的完整迁移尚未完成。七种输入模式的逐项实时验收、原生同条件对照、多节点 Figma 与直连三资料联合验收仍需继续；构建成功不等于视觉还原通过。
 
 ## 上游来源与许可
 

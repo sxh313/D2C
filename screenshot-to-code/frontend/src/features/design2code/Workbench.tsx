@@ -5,7 +5,7 @@ import "./workbench.css";
 import { FigmaArtifacts } from "./FigmaArtifacts";
 
 type ImageInput = { name: string; data: string };
-type Capabilities = { provider_configured: boolean; figma_mode: "mcp" | "rest"; figma_configured: boolean; generation_available: boolean; configuration_issues: string[]; token_limit_configured: boolean; cost_limit_configured: boolean };
+type Capabilities = { provider_configured: boolean; figma_mode: "mcp" | "rest"; figma_configured: boolean; generation_available: boolean; conversion_build_available?: boolean; configuration_issues: string[]; token_limit_configured: boolean; cost_limit_configured: boolean };
 type SourceSet = { source_set_id: string; source_set_revision: number; source_set_hash: string };
 type PendingRun = { sourceSet: SourceSet; key: string };
 type PendingRepair = { runId: string; instruction: string; key: string; draftText?: string };
@@ -21,7 +21,7 @@ type DialogRule = { open_button: string; dialog_name: string; close_button: stri
 const emptyDialogRule: DialogRule = { open_button: "", dialog_name: "", close_button: "" };
 type TabRule = { tab_name: string; initial_text: string; selected_text: string };
 const emptyTabRule: TabRule = { tab_name: "", initial_text: "", selected_text: "" };
-type Draft = { images: ImageInput[]; spec: string; figma: string; bundle: ImageInput | null; instruction: string; authority: Record<Dimension, string>; searchRule?: SearchRule; dialogRule?: DialogRule; tabRule?: TabRule; repairDrafts?: Record<string, string> };
+type Draft = { images: ImageInput[]; spec: string; figma: string; figmaReferenceOnly?: boolean; bundle: ImageInput | null; instruction: string; authority: Record<Dimension, string>; searchRule?: SearchRule; dialogRule?: DialogRule; tabRule?: TabRule; repairDrafts?: Record<string, string> };
 
 function openDraftDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -345,6 +345,7 @@ export default function D2CWorkbench() {
       setDialogRule(draft.dialogRule || emptyDialogRule);
       setTabRule(draft.tabRule || emptyTabRule);
       setFigma(draft.figma || "");
+      setFigmaReferenceOnly(draft.figmaReferenceOnly || false);
       setBundle(draft.bundle || null);
       setInstruction(draft.instruction || "");
       if (draft.authority) setAuthority(draft.authority);
@@ -358,7 +359,7 @@ export default function D2CWorkbench() {
     if (!draftReady || !draftStorageAvailable) return;
     let active = true;
     setDraftSaveState("saving");
-    const draft: Draft = { images, spec, figma, bundle, instruction, authority, searchRule, dialogRule, tabRule, repairDrafts };
+    const draft: Draft = { images, spec, figma, figmaReferenceOnly, bundle, instruction, authority, searchRule, dialogRule, tabRule, repairDrafts };
     const timer = window.setTimeout(() => {
       draftWrites.current = draftWrites.current.catch(() => {}).then(() => writeDraft(draft));
       void draftWrites.current.then(() => {
@@ -366,7 +367,7 @@ export default function D2CWorkbench() {
       }).catch(() => { if (active) setDraftError("草稿保存失败，请检查浏览器存储空间。"); });
     }, 300);
     return () => { active = false; window.clearTimeout(timer); };
-  }, [draftReady, draftStorageAvailable, images, spec, figma, bundle, instruction, authority, searchRule, dialogRule, tabRule, repairDrafts]);
+  }, [draftReady, draftStorageAvailable, images, spec, figma, figmaReferenceOnly, bundle, instruction, authority, searchRule, dialogRule, tabRule, repairDrafts]);
 
   const addImages = useCallback(async (files: File[]) => {
     if (!files.length) return;
@@ -587,6 +588,9 @@ export default function D2CWorkbench() {
   }
 
   const sourceLabels: Record<string, string> = { screenshot: "第一张截图", spec: "需求说明", figma: "Figma", figma_bundle: "FigmaToCode 项目包", instructions: "生成指令" };
+  const conversionOnly = images.length === 0 && !spec.trim() && !instruction.trim()
+    && ((!!bundle && !figma.trim()) || (!bundle && !!figma.trim() && !figmaReferenceOnly));
+  const canSubmit = capabilities?.generation_available || (conversionOnly && capabilities?.conversion_build_available);
   const sourceAvailable: Record<string, boolean> = { screenshot: images.length > 0, spec: !!spec.trim(), figma: !!figma.trim(), figma_bundle: !!bundle, instructions: !!instruction.trim() };
   const dimensionLabels: Record<Dimension, string> = { layout: "布局", style: "视觉样式", content: "内容", behavior: "交互" };
   const missingAuthority = (Object.keys(dimensionLabels) as Dimension[]).filter((dimension) => authority[dimension] && !sourceAvailable[authority[dimension]]);
@@ -849,14 +853,15 @@ export default function D2CWorkbench() {
           if (!window.confirm("清空当前截图、需求说明、Figma 链接、项目包、生成指令和验收设置？本机任务记录不会删除。")) return;
           bundleReadVersion.current += 1;
           setBundleReading(false);
-          imagesRef.current = []; setImages([]); setSpec(""); setFigma(""); setBundle(null); setInstruction("");
+          imagesRef.current = []; setImages([]); setSpec(""); setFigma(""); setFigmaReferenceOnly(false); setBundle(null); setInstruction("");
           setAuthority({ layout: "", style: "", content: "", behavior: "" });
           setSearchRule(emptySearchRule); setDialogRule(emptyDialogRule); setTabRule(emptyTabRule);
           setImageError(""); setError(""); setFigmaConnection("");
         }}>清空当前资料</button>
         {pendingRun && <div className="d2c-error" role="status"><strong>有一项任务的创建结果待确认</strong><p>恢复会使用原来的请求标识；如果请求尚未到达服务端，恢复会创建任务并可能调用模型。</p><button type="button" disabled={busy} onClick={() => void recoverPendingRun()}>恢复任务创建</button> <button type="button" disabled={busy} onClick={discardPendingRun}>放弃恢复</button><p>放弃只清除本机恢复记录，不会停止可能已创建的任务；请先查看最近的本机任务。</p></div>}
-        <button className="d2c-generate" disabled={isRunning || !!pendingRun || !!pendingRepair || imageReads > 0 || bundleReading || !capabilities?.generation_available} onClick={() => void handleGenerate()}>{isRunning ? <><LuRefreshCw className="d2c-spin" /> 正在处理</> : <>确认资料并生成 <LuArrowUpRight /></>}</button>
-        {run && <FigmaArtifacts key={run.run_id} runId={run.run_id} />}
+        {conversionOnly && <p className="d2c-help">仅含 Figma 转换结果且未附加指令：支持的 React/Vite 包将直接构建，模型请求为 0 次。需要增强交互时可添加需求说明或指令。</p>}
+        <button className="d2c-generate" disabled={isRunning || !!pendingRun || !!pendingRepair || imageReads > 0 || bundleReading || !canSubmit} onClick={() => void handleGenerate()}>{isRunning ? <><LuRefreshCw className="d2c-spin" /> 正在处理</> : <>{conversionOnly ? "确认资料并构建" : "确认资料并生成"} <LuArrowUpRight /></>}</button>
+        {run && <FigmaArtifacts key={run.run_id} runId={run.run_id} revision={run.result} />}
         {run && ["CREATED", "GENERATING", "BUILDING", "REPAIRING"].includes(run.status) && <button type="button" disabled={busy} onClick={() => void handleStop()}>停止当前任务</button>}
         {!capabilities?.generation_available && <div className="d2c-help" role="status">
           <p>{connectionError || (!capabilities ? "正在检查本机服务…" : "生成暂不可用，请检查以下配置和依赖。")}</p>

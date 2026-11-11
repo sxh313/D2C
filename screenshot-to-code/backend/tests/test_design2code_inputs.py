@@ -224,6 +224,8 @@ def test_manual_review_is_bound_to_candidate_and_does_not_change_checks(tmp_path
     candidate = tmp_path / "runs" / "run_review" / "candidate"
     candidate.mkdir(parents=True)
     (candidate / "package.json").write_text("{}", encoding="utf-8")
+    (candidate / "src").mkdir()
+    (candidate / "src" / "App.tsx").write_bytes(b"first\r\n")
     (candidate / "README.md").write_text("generated readme", encoding="utf-8")
     (candidate / "report.json").write_text("generated report", encoding="utf-8")
     (candidate / "report.generated.json").write_text("existing file", encoding="utf-8")
@@ -241,6 +243,10 @@ def test_manual_review_is_bound_to_candidate_and_does_not_change_checks(tmp_path
         assert archive.read("design2code-page/generated-report.generated.json") == b"generated report"
         assert archive.read("design2code-page/docs/README.md") == b"nested readme"
         report = json.loads(archive.read("design2code-page/report.json"))
+        import hashlib
+        exported_hashes = {file["path"]: file["content_hash"] for file in report["export_file_hashes"]}
+        assert exported_hashes["src/App.tsx"] == "sha256:" + hashlib.sha256(b"first\r\n").hexdigest()
+        assert exported_hashes["src/App.tsx"] != "sha256:" + hashlib.sha256(b"first\n").hexdigest()
     assert report["manual_review"]["visual"] == "PASS" and report["checks"] == result["checks"]
     with storage.connect() as db:
         row = db.execute("SELECT status,result_json FROM runs WHERE id='run_review'").fetchone()

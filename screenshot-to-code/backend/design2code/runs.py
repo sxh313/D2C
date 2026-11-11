@@ -19,6 +19,8 @@ from design2code.inspection import inspect_candidate, inspect_dialog, inspect_in
 from design2code.runner import build_candidate, cancel_build
 from design2code.settings import get_settings
 from design2code.storage import connect, get_input, get_source_set, identifier, json_encode, now
+from agent.project import is_project_file, normalize_project_source
+from design2code.figma_project import is_conversion_only
 
 
 def _event(db: Any, run_id: str, event_type: str, payload: dict[str, Any]) -> None:
@@ -36,10 +38,15 @@ def _visual_check(source_set: dict[str, Any], repaired: bool = False) -> dict[st
 
 
 def _agent_checks(usage: dict[str, Any]) -> list[dict[str, str]]:
+    project = usage.get("project")
+    checks: list[dict[str, str]] = []
+    if project and project["mode"] == "agent_project_edit" and not project["operations"]:
+        checks.append({"id": "project_edit", "status": "FAIL",
+                       "message": "模型没有成功执行工程文件修改；当前候选保留原转换源码，新增要求尚未实现。"})
     if usage.get("tool_policy", {}).get("agent_completion") == "request_limit_reached":
-        return [{"id": "agent_feedback", "status": "NOT_RUN",
-                 "message": "已保存官方 Agent 文件工具产物；本阶段最多一次模型请求，首轮与修复共享两次总额，未追加请求读取工具反馈。完整 Agent 反馈闭环未执行，本地构建与交互检查单独报告。"}]
-    return []
+        checks.append({"id": "agent_feedback", "status": "NOT_RUN",
+                       "message": "已保存官方 Agent 文件工具产物；本阶段最多一次模型请求，首轮与修复共享两次总额，未追加请求读取工具反馈。完整 Agent 反馈闭环未执行，本地构建与交互检查单独报告。"})
+    return checks
 
 
 def _pending_build_checks(source_set: dict[str, Any], repaired: bool = False) -> list[dict[str, str]]:
@@ -105,10 +112,11 @@ def create_run(set_id: str, revision: int, source_hash: str, key: str) -> tuple[
             if existing["status"] == "DELETED":
                 raise HTTPException(409, "此任务记录已删除，请重新创建任务。")
             return {"run_id": existing["id"]}, False
-        _ensure_model_available(settings)
         source_set = get_source_set(set_id, revision)
         if source_set is None or source_set["source_set_hash"] != source_hash:
             raise HTTPException(409, "资料集合不存在或已经变更。")
+        if not is_conversion_only(source_set):
+            _ensure_model_available(settings)
         confirmed = db.execute("SELECT 1 FROM source_confirmations WHERE set_id = ? AND revision = ? AND source_hash = ?",
                                (set_id, revision, source_hash)).fetchone()
         if not confirmed:
@@ -150,19 +158,11 @@ def parse_files(text: str) -> list[dict[str, str]]:
             raise ProviderError("GENERATION_INVALID", "生成的文件结构无效。")
         path = cast(str, item["path"])
         parts = PurePosixPath(path).parts
-        allowed = path in {"src/App.tsx", "src/index.css"} or (path.startswith("src/components/") and path.endswith((".tsx", ".ts", ".css")))
+        allowed = is_project_file(path)
         if not allowed or ".." in parts or "\\" in path or path in seen or len(item["content"]) > 300_000:
             raise ProviderError("GENERATION_INVALID", "生成结果包含不允许的文件路径、重复文件或过大文件。")
         seen.add(path)
-        content = cast(str, item["content"])
-        # The preview lives below /<run>/<candidate>/; root-relative image
-        # src values bypass that prefix. Preserve other code and URLs.
-        if path.endswith(".tsx"):
-            content = re.sub(r"(\bsrc\s*=\s*[\"'])/images/", r"\1./images/", content)
-        elif path.endswith(".css"):
-            # Vite resolves public assets in CSS from /images/ and rewrites them
-            # for its configured base; ./images/ would resolve below assets/.
-            content = re.sub(r"(url\(\s*[\"']?)\./images/", r"\1/images/", content, flags=re.IGNORECASE)
+        content = normalize_project_source(path, cast(str, item["content"]))
         output.append({"path": path, "content": content})
     if len(output) > 40 or not {"src/App.tsx", "src/index.css"}.issubset(seen):
         raise ProviderError("GENERATION_INVALID", "生成结果缺少 App.tsx 或 index.css。")
@@ -214,6 +214,7 @@ async def execute(run_id: str) -> None:
                                   "tools": usage.get("tools", []),
                                   "provider": usage.get("provider", "openai"),
                                   "tool_policy": usage.get("tool_policy", {}),
+                                  "project": usage.get("project"),
                                   "model": usage.get("model", getattr(settings, "model", "openai/gpt-6-luna"))}
         with connect() as db:
             changed = db.execute("UPDATE runs SET status = 'BUILDING', result_json = ?, updated_at = ? WHERE id = ? AND status = 'GENERATING'",
@@ -349,6 +350,7 @@ async def execute_repair(run_id: str, instruction: str) -> None:
             "tools": usage.get("tools", []),
             "provider": usage.get("provider", "openai"),
             "tool_policy": usage.get("tool_policy", {}),
+            "project": usage.get("project"),
             "model": usage.get("model", getattr(get_settings(), "model", "openai/gpt-6-luna")),
         }
         with connect() as db:
@@ -370,6 +372,7 @@ async def execute_repair(run_id: str, instruction: str) -> None:
             "tools": usage.get("tools", []),
             "provider": usage.get("provider", "openai"),
             "tool_policy": usage.get("tool_policy", {}),
+            "project": usage.get("project"),
             "model": usage.get("model", getattr(get_settings(), "model", "openai/gpt-6-luna")),
             "checks": [
                 {"id": "build", "status": build["status"], "message": build["message"]},
