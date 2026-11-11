@@ -5,7 +5,7 @@ import hashlib
 import json
 import re
 from pathlib import PurePosixPath
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 from fastapi import HTTPException
 
@@ -33,6 +33,13 @@ def _visual_check(source_set: dict[str, Any], repaired: bool = False) -> dict[st
         if len(inputs) == len(sources) and all(item is not None and item.get("input_type") == "spec" for item in inputs):
             return {"id": "visual", "status": "NOT_APPLICABLE", "message": "仅提供了 Spec，没有图片参考，视觉参考图对比不适用；仍需人工检查页面样式。"}
     return {"id": "visual", "status": "NOT_RUN", "message": "修复后的视觉自动对比尚未执行。" if repaired else "视觉还原自动对比尚未执行。"}
+
+
+def _agent_checks(usage: dict[str, Any]) -> list[dict[str, str]]:
+    if usage.get("tool_policy", {}).get("agent_completion") == "request_limit_reached":
+        return [{"id": "agent_feedback", "status": "NOT_RUN",
+                 "message": "已保存官方 Agent 文件工具产物；本阶段最多一次模型请求，首轮与修复共享两次总额，未追加请求读取工具反馈。完整 Agent 反馈闭环未执行，本地构建与交互检查单独报告。"}]
+    return []
 
 
 def _pending_build_checks(source_set: dict[str, Any], repaired: bool = False) -> list[dict[str, str]]:
@@ -169,18 +176,14 @@ async def execute(run_id: str) -> None:
         row = db.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
         if row is None or row["status"] != "CREATED" or row["calls"] >= settings.model_request_limit:
             return
-        db.execute("UPDATE runs SET status = 'GENERATING', calls = calls + 1, updated_at = ? WHERE id = ?", (now(), run_id))
-        _event(db, run_id, "GENERATING", {"status": "GENERATING", "model_request": row["calls"] + 1})
+        db.execute("UPDATE runs SET status = 'GENERATING', updated_at = ? WHERE id = ?", (now(), run_id))
+        _event(db, run_id, "GENERATING", {"status": "GENERATING"})
     source_set = get_source_set(row["set_id"], row["revision"])
     try:
         if source_set is None:
             raise ProviderError("INPUT_MISSING", "任务资料不存在。")
-        text, usage = await generate(settings, source_set)
-        actual_calls = usage.get("model_requests") if isinstance(usage, dict) else None
-        if isinstance(actual_calls, int) and actual_calls >= 1:
-            with connect() as db:
-                db.execute("UPDATE runs SET calls = MIN(calls + ?, ?) WHERE id = ? AND status = 'GENERATING'",
-                           (actual_calls - 1, settings.model_request_limit, run_id))
+        text, usage = await generate(settings, source_set,
+                                    before_request=request_claimer(run_id, "GENERATING"))
         try:
             files = parse_files(text)
         except ProviderError as exc:
@@ -203,7 +206,7 @@ async def execute(run_id: str) -> None:
                 if changed.rowcount:
                     _event(db, run_id, "FAILED", {"status": "FAILED", "code": exc.code, "message": str(exc)})
             return
-        result: dict[str, Any] = {"files": files, "usage": usage, "cost": None, "cost_status": "UNKNOWN", "candidate_name": "candidate", "checks": _pending_build_checks(source_set),
+        result: dict[str, Any] = {"files": files, "usage": usage, "cost": None, "cost_status": "UNKNOWN", "candidate_name": "candidate", "checks": _pending_build_checks(source_set) + _agent_checks(usage),
                                   "engine": usage.get("engine", "screenshot-to-code-agent"),
                                   "engine_version": usage.get("engine_version"),
                                   "agent_run_id": usage.get("agent_run_id"),
@@ -228,6 +231,7 @@ async def execute(run_id: str) -> None:
             {"id": "manual_review", "status": "MANUAL_REVIEW" if build["status"] == "PASS" else "NOT_RUN",
              "message": "请人工核对视觉还原与需求交互。" if build["status"] == "PASS" else "构建通过后才能人工核对页面。"},
         ]
+        result["checks"].extend(_agent_checks(usage))
         if build["status"] == "PASS":
             result["checks"].append(await inspect_candidate(run_id, "candidate"))
             result["checks"].append(await inspect_interactions(run_id, "candidate"))
@@ -264,6 +268,24 @@ async def execute(run_id: str) -> None:
                 _event(db, run_id, interrupted_status, {"status": interrupted_status, "code": "EXECUTION_INTERRUPTED"})
 
 
+def request_claimer(run_id: str, phase: str) -> Callable[[str, str], None]:
+    """Durably count requests at the provider boundary, including failed sends."""
+    def claim(provider: str, model: str) -> None:
+        limit = get_settings().model_request_limit
+        with connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            changed = db.execute(
+                "UPDATE runs SET calls=calls+1, updated_at=? WHERE id=? AND status=? AND calls < ?",
+                (now(), run_id, phase, limit),
+            )
+            if not changed.rowcount:
+                raise ProviderError("REQUEST_LIMIT", "任务已停止或模型请求次数已用完；未发起新请求。")
+            row = db.execute("SELECT calls FROM runs WHERE id=?", (run_id,)).fetchone()
+            _event(db, run_id, "MODEL_REQUEST", {"provider": provider, "model": model,
+                                               "phase": phase, "model_request": row["calls"]})
+    return claim
+
+
 def request_repair(run_id: str, instruction: str, key: str) -> bool:
     settings = get_settings()
     request_hash = hashlib.sha256(json_encode({"run_id": run_id, "instruction": instruction}).encode()).hexdigest()
@@ -288,9 +310,9 @@ def request_repair(run_id: str, instruction: str, key: str) -> bool:
         if db.execute("SELECT 1 FROM runs WHERE id != ? AND status IN ('CREATED','GENERATING','BUILDING','REPAIRING')", (run_id,)).fetchone():
             raise HTTPException(409, "已有其他任务正在运行。")
         db.execute("INSERT INTO repair_requests VALUES (?, ?, ?, ?)", (key, run_id, request_hash, now()))
-        db.execute("UPDATE runs SET status = 'REPAIRING', calls = calls + 1, repairs = repairs + 1, error = NULL, updated_at = ? WHERE id = ?",
+        db.execute("UPDATE runs SET status = 'REPAIRING', repairs = repairs + 1, error = NULL, updated_at = ? WHERE id = ?",
                    (now(), run_id))
-        _event(db, run_id, "REPAIRING", {"status": "REPAIRING", "model_request": row["calls"] + 1})
+        _event(db, run_id, "REPAIRING", {"status": "REPAIRING"})
     return True
 
 
@@ -313,18 +335,13 @@ async def execute_repair(run_id: str, instruction: str) -> None:
         feedback = json_encode({"instruction": instruction, "files": original["files"],
                                 "invalid_output": original.get("invalid_output", ""),
                                 "build_details": original.get("build_details", "")})
-        text, usage = await generate(get_settings(), source_set, repair_context=feedback)
-        actual_calls = usage.get("model_requests") if isinstance(usage, dict) else None
-        repair_settings = get_settings()
-        if isinstance(actual_calls, int) and actual_calls >= 1:
-            with connect() as db:
-                db.execute("UPDATE runs SET calls = MIN(calls + ?, ?) WHERE id = ? AND status = 'REPAIRING'",
-                           (actual_calls - 1, repair_settings.model_request_limit, run_id))
+        text, usage = await generate(get_settings(), source_set, repair_context=feedback,
+                                    before_request=request_claimer(run_id, "REPAIRING"))
         files = parse_files(text)
         result: dict[str, Any] = {
             "files": files, "usage": usage, "cost": None, "cost_status": "UNKNOWN",
             "candidate_name": "candidate-2", "previous_candidate": original,
-            "checks": _pending_build_checks(source_set, repaired=True),
+            "checks": _pending_build_checks(source_set, repaired=True) + _agent_checks(usage),
             "engine": usage.get("engine", "screenshot-to-code-agent"),
             "engine_version": usage.get("engine_version"),
             "agent_run_id": usage.get("agent_run_id"),
@@ -362,6 +379,7 @@ async def execute_repair(run_id: str, instruction: str) -> None:
                  "message": "请人工重新核对视觉还原与需求交互。" if build["status"] == "PASS" else "构建通过后才能人工核对页面。"},
             ],
         }
+        result["checks"].extend(_agent_checks(usage))
         if build["status"] == "PASS":
             result["checks"].append(await inspect_candidate(run_id, "candidate-2"))
             result["checks"].append(await inspect_interactions(run_id, "candidate-2"))

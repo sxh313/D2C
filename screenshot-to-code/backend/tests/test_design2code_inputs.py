@@ -336,8 +336,9 @@ async def test_duplicate_initial_execution_calls_model_once(tmp_path: Path, monk
     monkeypatch.setattr(runs, "build_candidate", lambda *_args: {"status": "FAIL", "message": "simulated build"})
     started, release = asyncio.Event(), asyncio.Event()
     calls = 0
-    async def fake_generate(_settings: Any, _source_set: Any) -> tuple[str, dict[str, Any]]:
+    async def fake_generate(_settings: Any, _source_set: Any, **kwargs: Any) -> tuple[str, dict[str, Any]]:
         nonlocal calls
+        kwargs["before_request"]("openai", "test")
         calls += 1
         started.set()
         await release.wait()
@@ -491,7 +492,8 @@ async def test_failed_build_report_distinguishes_unrun_checks(tmp_path: Path, mo
     monkeypatch.setattr(runs, "get_source_set", lambda *_args: {"search_check": {"placeholder": "搜索", "query": "邮件", "visible_text": "查看邮件", "hidden_text": "整理文件"}})
     monkeypatch.setattr(runs, "build_candidate", lambda *_args: {"status": "FAIL", "message": "build failed"})
 
-    async def fake_generate(_settings: Any, _source_set: Any) -> tuple[str, dict[str, Any]]:
+    async def fake_generate(_settings: Any, _source_set: Any, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+        kwargs["before_request"]("openai", "test")
         return ('{"files":[{"path":"src/App.tsx","content":"invalid"},{"path":"src/index.css","content":""}]}', {})
 
     monkeypatch.setattr(runs, "generate", fake_generate)
@@ -518,6 +520,7 @@ async def test_initial_output_survives_restart_during_build(tmp_path: Path, monk
         return {"status": "FAIL", "message": "interrupted"}
 
     async def fake_generate(*_args: Any, **_kwargs: Any) -> tuple[str, dict[str, Any]]:
+        _kwargs["before_request"]("openai", "test")
         return ('{"files":[{"path":"src/App.tsx","content":"new"},{"path":"src/index.css","content":""}]}', {})
 
     monkeypatch.setattr(runs, "generate", fake_generate)
@@ -553,6 +556,7 @@ async def test_repair_output_survives_restart_during_build(tmp_path: Path, monke
         return {"status": "FAIL", "message": "interrupted"}
 
     async def fake_generate(*_args: Any, **_kwargs: Any) -> tuple[str, dict[str, Any]]:
+        _kwargs["before_request"]("openai", "test")
         return ('{"files":[{"path":"src/App.tsx","content":"new"},{"path":"src/index.css","content":""}]}', {})
 
     monkeypatch.setattr(runs, "generate", fake_generate)
@@ -592,6 +596,7 @@ async def test_repair_execution_claim_prevents_duplicate_model_calls(tmp_path: P
 
     async def fake_generate(*_args: Any, **_kwargs: Any) -> tuple[str, dict[str, Any]]:
         nonlocal calls
+        _kwargs["before_request"]("openai", "test")
         calls += 1
         started.set()
         await release.wait()
@@ -628,7 +633,8 @@ async def test_invalid_generation_can_be_repaired_once(tmp_path: Path, monkeypat
     monkeypatch.setattr(runs, "get_source_set", lambda *_args: {})
     monkeypatch.setattr(runs, "build_candidate", lambda *_args: {"status": "FAIL", "message": "simulated build"})
     calls: list[str] = []
-    async def fake_generate(_settings: Any, _source_set: Any, repair_context: str = "") -> tuple[str, dict[str, Any]]:
+    async def fake_generate(_settings: Any, _source_set: Any, repair_context: str = "", **kwargs: Any) -> tuple[str, dict[str, Any]]:
+        kwargs["before_request"]("openai", "test")
         calls.append(repair_context)
         if not repair_context:
             return "invalid model response", {}
@@ -1124,7 +1130,8 @@ async def test_cancel_during_provider_call_does_not_build_or_overwrite_status(tm
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def fake_generate(_settings: Any, _source_set: Any) -> tuple[str, dict[str, Any]]:
+    async def fake_generate(_settings: Any, _source_set: Any, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+        kwargs["before_request"]("openai", "test")
         started.set()
         await release.wait()
         return ('{"files":[{"path":"src/App.tsx","content":"x"},{"path":"src/index.css","content":"x"}]}', {})
@@ -1204,8 +1211,9 @@ def test_confirmed_run_is_idempotent_and_calls_model_once(
     ))
     call_count = 0
 
-    async def fake_generate(_settings: Any, _source_set: dict[str, Any], repair_context: str = "") -> tuple[str, dict[str, Any]]:
+    async def fake_generate(_settings: Any, _source_set: dict[str, Any], repair_context: str = "", **kwargs: Any) -> tuple[str, dict[str, Any]]:
         nonlocal call_count
+        kwargs["before_request"]("openai", "test")
         call_count += 1
         return ('{"files":[{"path":"src/App.tsx","content":"export default function App() { return null; }"},'
                 '{"path":"src/index.css","content":"body {}"}]}', {"input_tokens": 10})
@@ -1308,7 +1316,8 @@ def test_three_sources_are_passed_together_to_generation(tmp_path: Path, monkeyp
     monkeypatch.setattr(inputs.httpx, "AsyncClient", lambda **_kwargs: client_type(transport=httpx.MockTransport(handle)))
     seen: list[dict[str, Any]] = []
 
-    async def fake_generate(_settings: Any, source_set: dict[str, Any], repair_context: str = "") -> tuple[str, dict[str, Any]]:
+    async def fake_generate(_settings: Any, source_set: dict[str, Any], repair_context: str = "", **kwargs: Any) -> tuple[str, dict[str, Any]]:
+        kwargs["before_request"]("openai", "test")
         seen.append(source_set)
         return ('{"files":[{"path":"src/App.tsx","content":"export default function App() { return null; }"},'
                 '{"path":"src/index.css","content":"body {}"}]}', {})

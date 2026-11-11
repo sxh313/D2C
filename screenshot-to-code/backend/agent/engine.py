@@ -10,6 +10,7 @@ from llm import Llm
 
 from agent.providers.base import ExecutedToolCall, ProviderSession, StreamEvent
 from agent.providers.factory import create_provider_session
+from agent.request_policy import RequestPolicy
 from agent.state import AgentFileState, seed_file_state_from_messages
 from agent.tools import (
     AgentToolRuntime,
@@ -69,10 +70,13 @@ class AgentEngine:
         recorder: Optional[AgentRunRecorder] = None,
         max_turns: int = 30,
         enable_screenshot_preview: bool = True,
+        request_policy: Optional[RequestPolicy] = None,
     ):
         self.send_message = send_message
         self.variant_index = variant_index
         self.recorder = recorder
+        self.request_policy = request_policy
+        self.completion_status = "not_started"
         # Workbench callers can enforce their per-run provider request budget;
         # the native UI keeps the historical 30-turn Agent behaviour.
         self.max_turns = max(1, max_turns)
@@ -99,6 +103,7 @@ class AgentEngine:
             replicate_api_key=replicate_api_key,
             asset_base_url=asset_base_url,
             option_codes=option_codes,
+            allowed_tools=request_policy.allowed_tools if request_policy else None,
         )
         self._tool_preview_lengths: Dict[str, int] = {}
 
@@ -268,13 +273,14 @@ class AgentEngine:
             turn = await session.stream_turn(on_event)
 
             if not turn.tool_calls:
+                self.completion_status = "completed"
                 return await self._finalize_response(turn.assistant_text)
 
             # Abort only when the run would otherwise continue: a run that
             # just produced its final answer is already paid for. Unpriced
             # models return None and are not bounded.
             spent = session.total_cost_usd()
-            if spent is not None and spent > GENERATION_MAX_COST_USD:
+            if self.request_policy is None and spent is not None and spent > GENERATION_MAX_COST_USD:
                 print(
                     f"[BUDGET] Aborting variant {self.variant_index}: "
                     f"${spent:.2f} > ${GENERATION_MAX_COST_USD:.2f}"
@@ -330,6 +336,12 @@ class AgentEngine:
 
             await session.append_tool_results(turn, executed_tool_calls)
 
+        if self.request_policy is not None and self.file_state.content:
+            # Preserve the real tool-produced artifact, without claiming that
+            # the provider consumed tool results or completed its Agent loop.
+            self.completion_status = "request_limit_reached"
+            await self._send("status", "Request limit reached; saved output requires local checks.")
+            return self.file_state.content
         raise Exception("Agent exceeded max tool turns")
 
     async def run(self, model: Llm, prompt_messages: List[ChatCompletionMessageParam]) -> str:
@@ -357,13 +369,14 @@ class AgentEngine:
             ),
             recorder=self.recorder,
             screenshot_enabled=self.enable_screenshot_preview,
+            request_policy=self.request_policy,
         )
         try:
             result = await self._run_with_session(session)
             if not result:
                 raise EmptyOutputError()
             if self.recorder is not None:
-                await self.recorder.record_run_end("completed", final_html=result)
+                await self.recorder.record_run_end(self.completion_status, final_html=result)
             return result
         # BaseException so cancellation (client disconnect) still finalizes
         # the run record instead of leaving it stuck at "running".
@@ -371,7 +384,7 @@ class AgentEngine:
             if self.recorder is not None:
                 await self.recorder.record_run_end(
                     "failed",
-                    error="".join(
+                    error=type(exc).__name__ if self.request_policy is not None else "".join(
                         traceback.format_exception_only(type(exc), exc)
                     ).strip(),
                 )

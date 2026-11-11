@@ -38,6 +38,7 @@ class AgentToolRuntime:
         asset_base_url: str = "",
         user_id: Optional[str] = None,
         option_codes: Optional[List[str]] = None,
+        allowed_tools: Optional[frozenset[str]] = None,
     ):
         self.file_state = file_state
         self.should_generate_images = should_generate_images
@@ -49,11 +50,18 @@ class AgentToolRuntime:
         self.asset_base_url = asset_base_url
         self.user_id = user_id
         self.option_codes = option_codes or []
+        self.allowed_tools = allowed_tools
 
     def _effective_replicate_api_key(self) -> str | None:
         return self.replicate_api_key or REPLICATE_API_KEY
 
     async def execute(self, tool_call: ToolCall) -> ToolExecutionResult:
+        if self.allowed_tools is not None and tool_call.name not in self.allowed_tools:
+            return ToolExecutionResult(
+                ok=False,
+                result={"error": "Tool disabled by request policy; no external request was made."},
+                summary={"error": "TOOL_DISABLED_BY_POLICY"},
+            )
         if "INVALID_JSON" in tool_call.arguments:
             invalid_json = ensure_str(tool_call.arguments.get("INVALID_JSON"))
             return ToolExecutionResult(

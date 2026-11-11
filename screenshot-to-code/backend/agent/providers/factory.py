@@ -9,6 +9,7 @@ from agent.providers.anthropic import AnthropicProviderSession, serialize_anthro
 from agent.providers.base import ProviderSession
 from agent.providers.gemini import GeminiProviderSession, serialize_gemini_tools
 from agent.providers.openai import OpenAIProviderSession, serialize_openai_tools
+from agent.request_policy import RequestPolicy
 from agent.tools import canonical_tool_definitions
 from config import REPLICATE_API_KEY
 from fs_logging.agent_runs import AgentRunRecorder
@@ -28,7 +29,10 @@ def create_provider_session(
     should_extract_assets: bool = True,
     recorder: Optional[AgentRunRecorder] = None,
     screenshot_enabled: Optional[bool] = None,
+    request_policy: Optional[RequestPolicy] = None,
 ) -> ProviderSession:
+    if request_policy is not None and model not in OPENAI_MODELS:
+        raise ValueError("Bounded request policy currently requires the OpenAI provider.")
     canonical_tools = canonical_tool_definitions(
         image_generation_enabled=should_generate_images,
         # The edit_images tool calls Replicate, so don't offer it without a key.
@@ -40,17 +44,24 @@ def create_provider_session(
                             if screenshot_enabled is None else screenshot_enabled),
     )
 
+    if request_policy is not None:
+        canonical_tools = [tool for tool in canonical_tools if tool.name in request_policy.allowed_tools]
+
     if model in OPENAI_MODELS:
         if not openai_api_key:
             raise Exception("OpenAI API key is missing.")
 
-        client = AsyncOpenAI(api_key=openai_api_key, base_url=openai_base_url)
+        client = (AsyncOpenAI(api_key=openai_api_key, base_url=openai_base_url,
+                              max_retries=0, timeout=request_policy.timeout)
+                  if request_policy is not None else
+                  AsyncOpenAI(api_key=openai_api_key, base_url=openai_base_url))
         return OpenAIProviderSession(
             client=client,
             model=model,
             prompt_messages=prompt_messages,
             tools=serialize_openai_tools(canonical_tools),
             recorder=recorder,
+            request_policy=request_policy,
         )
 
     if model in ANTHROPIC_MODELS:

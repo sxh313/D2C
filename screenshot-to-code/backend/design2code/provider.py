@@ -8,7 +8,7 @@ of recreating that protocol locally.
 
 import json
 import uuid
-from typing import Any, cast
+from typing import Any, Callable, cast
 from urllib.parse import quote
 
 import httpx
@@ -18,7 +18,8 @@ from design2code.storage import get_input, json_encode
 
 
 async def generate_agent(settings: Settings, source_set: dict[str, Any], *,
-                         repair_context: str = "") -> tuple[str, dict[str, Any]]:
+                         repair_context: str = "",
+                         before_request: Callable[[str, str], None] | None = None) -> tuple[str, dict[str, Any]]:
     """Run the vendored screenshot-to-code Agent for one D2C request.
 
     The upstream Agent currently emits one HTML file.  The adapter preserves
@@ -26,6 +27,7 @@ async def generate_agent(settings: Settings, source_set: dict[str, Any], *,
     the rest of the workbench can build, preview, inspect and export it.
     """
     from agent.runner import Agent
+    from agent.request_policy import RequestPolicy
     from fs_logging.agent_runs import AgentRunRecorder
     from llm import Llm
     from prompts.pipeline import build_prompt_messages
@@ -61,6 +63,11 @@ FigmaToCode 源码是结构骨架；在你的 HTML 输出中保留其布局、�
         elif msg_type == "variantError":
             events.append({"type": msg_type, "message": (value or "")[:500]})
 
+    # One provider turn per phase reserves the second Run request for repair.
+    # File tools still execute; the unconsumed tool feedback is explicitly
+    # reported as a bounded draft, not a completed native Agent loop.
+    policy = RequestPolicy(limit=1, before_request=before_request,
+                           timeout=float(getattr(settings, "provider_timeout", 180)))
     generation_id = f"d2c_{uuid.uuid4().hex[:16]}"
     recorder = AgentRunRecorder(
         generation_id=generation_id, variant_index=0, entry_point="design2code",
@@ -72,7 +79,7 @@ FigmaToCode 源码是结构骨架；在你的 HTML 输出中保留其布局、�
         anthropic_api_key=None, gemini_api_key=None, replicate_api_key=None,
         should_generate_images=False, should_extract_assets=False,
         asset_base_url="", initial_file_state=None, option_codes=[], recorder=recorder,
-        max_turns=min(2, max(1, int(getattr(settings, "model_request_limit", 2)))),
+        max_turns=policy.limit, request_policy=policy,
         # The upstream prompt asks for screenshot_preview after create_file,
         # which requires a third provider turn to answer.  The workbench's
         # hard two-request budget therefore disables that optional tool and
@@ -85,7 +92,10 @@ FigmaToCode 源码是结构骨架；在你的 HTML 输出中保留其布局、�
     except Exception as exc:
         # Agent.run finalizes its recorder before propagating. Keep the public
         # error useful while never returning provider credentials.
-        raise ProviderError("AGENT_FAILED", f"上游 screenshot-to-code Agent 执行失败：{exc}", unknown=True) from exc
+        if isinstance(exc, ProviderError):
+            raise
+        raise ProviderError("AGENT_FAILED", "上游 Agent 执行失败；不会自动重试，供应商错误详情已隐藏以保护凭证。",
+                            unknown=policy.requests > 0) from exc
 
     if not html.strip():
         raise ProviderError("AGENT_EMPTY", "上游 Agent 未生成页面内容。")
@@ -114,11 +124,14 @@ FigmaToCode 源码是结构骨架；在你的 HTML 输出中保留其布局、�
               "generation_id": generation_id,
               "agent_run_id": recorder.run_id,
               "tools": events,
-              "tool_policy": {"screenshot_preview": "disabled_for_two_request_budget"},
+              "tool_policy": {"screenshot_preview": "disabled_for_two_request_budget",
+                              "provider_tools": "disabled_until_shared_accounting_supported",
+                              "allowed_tools": sorted(policy.allowed_tools),
+                              "agent_completion": agent.completion_status},
               "provider": "openai",
               "model": settings.model,
               "input_mode": input_mode,
-              "model_requests": max(1, int(getattr(recorder, "_step", 1))),
+              "model_requests": policy.requests,
               "repair_context": bool(repair_context)}
     return json.dumps(result, ensure_ascii=False), result
 

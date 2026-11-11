@@ -24,6 +24,7 @@ from agent.providers.base import (
 from costs.pricing import MODEL_PRICING
 from costs.token_usage import TokenUsage
 from agent.state import ensure_str
+from agent.request_policy import RequestPolicy
 from agent.tools import CanonicalToolDefinition, ToolCall, parse_json_arguments
 from fs_logging.agent_runs import AgentRunRecorder
 from fs_logging.prompt_reports import PromptReportLogger
@@ -485,12 +486,14 @@ class OpenAIProviderSession(ProviderSession):
         prompt_messages: List[ChatCompletionMessageParam],
         tools: List[Dict[str, Any]],
         recorder: Optional[AgentRunRecorder] = None,
+        request_policy: Optional[RequestPolicy] = None,
     ):
         self._client = client
         self._model = model
         self._tools = tools
         self._total_usage = TokenUsage()
         self._recorder = recorder
+        self._request_policy = request_policy
         self._prompt_report_logger = PromptReportLogger(
             provider="openai",
             model=model,
@@ -528,14 +531,17 @@ class OpenAIProviderSession(ProviderSession):
             "tools": self._tools,
             "tool_choice": "auto",
             "stream": True,
-            "max_output_tokens": 50000,
         }
+        if self._request_policy is None:
+            params["max_output_tokens"] = 50000
         if model_name == "gpt-5.4-2026-03-05":
             params["prompt_cache_retention"] = "24h"
         reasoning_effort = get_openai_reasoning_effort(self._model)
         if reasoning_effort:
             params["reasoning"] = {"effort": reasoning_effort, "summary": "auto"}
 
+        if self._request_policy is not None:
+            self._request_policy.claim("openai", model_name)
         self._prompt_report_logger.record_request(params)
         if self._recorder is not None:
             self._recorder.record_llm_request("openai", model_name, params)
