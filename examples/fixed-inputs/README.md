@@ -22,4 +22,10 @@
 
 ## 核对固定输入
 
-在项目根目录运行 `python examples/fixed-inputs/verify.py`。工具检查 `checksums.json` 列出的 17 个样例文件，包括截图、Spec、指令、标签验收规则和组合来源设置；全部一致返回退出码 0，缺失或不匹配返回 1。为兼容 Windows 与其他系统的 Git 换行方式，文本和 JSON 在校验前将 CRLF 转为 LF，图片按原始字节校验。清单本身需要随可信版本一起获取；校验不证明生成结果相同，也不包含 Figma 节点、模型、模板或运行环境。
+在项目根目录运行 `python examples/fixed-inputs/verify.py`。工具检查 `checksums.json` 列出的 19 个样例文件，包括截图、Spec、指令、标签验收规则和组合来源设置；全部一致返回退出码 0，缺失或不匹配返回 1。为兼容 Windows 与其他系统的 Git 换行方式，文本和 JSON 在校验前将 CRLF 转为 LF，图片按原始字节校验。清单本身需要随可信版本一起获取；校验不证明生成结果相同，也不包含实时 Figma 节点、模型、模板或运行环境。
+
+## 真实 FigmaToCode 单图项目包：figma-plugin-image
+
+在“更多参考资料：FigmaToCode 项目包”上传 `reference.zip`，将 `instruction.txt` 粘贴到生成指令。该 ZIP 由本机 Figma 测试画板通过 FigmaToCode 插件实际导出，包含本项目示例图片及 Vite 源码；工作台只使用包内源码和图片作为参考，不执行包内依赖或脚本。原任务 `run_6956f11c82734beeacf6e1fdb6208e2b` 已生成、修改并完成导出工程构建检查，详情见项目使用与验收记录。
+
+此素材可离线携带用于项目包导入，不含实时 Figma 节点、插件连接或模型输出。重新生成会调用模型并可能产生费用；新任务仍需独立检查。该样例只有一张图片，不能证明复杂画板的转换效果。
