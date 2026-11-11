@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { MutableRefObject, useCallback, useEffect, useRef, useState } from "react";
 import classNames from "classnames";
 import useThrottle from "../../hooks/useThrottle";
 import { useAppStore } from "../../store/app-store";
@@ -19,6 +19,13 @@ interface Props {
   device: "mobile" | "desktop";
   onScaleChange?: (scale: number) => void;
   viewMode?: "fit" | "actual";
+  project?: {
+    url: string;
+    viewport: { width: number; height: number };
+    frameRef?: MutableRefObject<HTMLIFrameElement | null>;
+    onLoad?: () => void;
+  };
+  title?: string;
 }
 
 const MOBILE_VIEWPORT_WIDTH = 375;
@@ -29,6 +36,8 @@ function PreviewComponent({
   device,
   onScaleChange,
   viewMode,
+  project,
+  title = "Preview",
 }: Props) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -39,6 +48,9 @@ function PreviewComponent({
   // Select and edit functionality
   const [clickEvent, setClickEvent] = useState<MouseEvent | null>(null);
   const activeMode = viewMode ?? "fit";
+  const projectUrl = project?.url;
+  const viewportWidth = project?.viewport.width;
+  const viewportHeight = project?.viewport.height;
 
   // In select-and-edit mode, intercept clicks in the capture phase so the
   // generated app's own handlers (React/Vue listeners, Bootstrap/Ionic
@@ -150,16 +162,18 @@ function PreviewComponent({
   // (clearing it when the selection is cleared from anywhere, e.g. the
   // sidebar's X button or after submitting an edit).
   useEffect(() => {
+    if (projectUrl) return; // Built projects use their isolated postMessage selection bridge.
     if (selectedElement && selectedElement.isConnected) {
       showSelectionOverlay(selectedElement);
       return;
     }
     hideSelectionOverlay(iframeRef.current?.contentWindow?.document);
-  }, [selectedElement]);
+  }, [selectedElement, projectUrl]);
 
   // Apply/remove select-mode side effects (cursor, hover and selection
   // rings) when the mode toggles.
   useEffect(() => {
+    if (projectUrl) return;
     const doc = iframeRef.current?.contentWindow?.document;
     if (inSelectAndEditMode) {
       applySelectModeCursor(doc);
@@ -172,7 +186,7 @@ function PreviewComponent({
     removeHoverOverlay(doc);
     removeSelectionOverlay(doc);
     removeSelectModeCursor(doc);
-  }, [inSelectAndEditMode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [inSelectAndEditMode, projectUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Apply a fixed viewport per device and scale to fit the available pane.
   useEffect(() => {
@@ -183,6 +197,17 @@ function PreviewComponent({
 
       const viewportWidth = wrapper.clientWidth;
       const viewportHeight = wrapper.clientHeight;
+
+      if (project) {
+        const { width, height } = project.viewport;
+        const scale = activeMode === "fit" ? Math.min(1, viewportWidth / width) : 1;
+        onScaleChange?.(scale);
+        iframe.style.width = `${width}px`;
+        iframe.style.height = `${height}px`;
+        iframe.style.transform = `scale(${scale})`;
+        iframe.style.transformOrigin = "top left";
+        return;
+      }
 
       if (device === "desktop") {
         const scaleValue =
@@ -217,9 +242,10 @@ function PreviewComponent({
       window.removeEventListener("resize", updateScale);
       resizeObserver.disconnect();
     };
-  }, [activeMode, device, onScaleChange]);
+  }, [activeMode, device, onScaleChange, viewportWidth, viewportHeight, projectUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (projectUrl) return;
     const iframe = iframeRef.current;
     if (!iframe) return;
 
@@ -280,9 +306,11 @@ function PreviewComponent({
     handleIframeMouseOut,
     handleIframeReposition,
     handleIframeKeyDown,
+    projectUrl,
   ]);
 
   useEffect(() => {
+    if (projectUrl) return;
     const iframe = iframeRef.current;
     if (!iframe) return;
     // Normalize the Babel CDN so generated React pages (old and new) mount.
@@ -290,7 +318,7 @@ function PreviewComponent({
     if (iframe.srcdoc !== html) {
       iframe.srcdoc = html;
     }
-  }, [throttledCode]);
+  }, [throttledCode, projectUrl]);
 
   return (
     <div
@@ -304,12 +332,18 @@ function PreviewComponent({
     >
       <div
         ref={wrapperRef}
-        className={`w-full h-full ${device === "mobile" ? "flex justify-center" : ""}`}
+        className={`w-full h-full ${device === "mobile" && !project ? "flex justify-center" : ""}`}
       >
         <iframe
           id={`preview-${device}`}
-          ref={iframeRef}
-          title="Preview"
+          ref={(frame) => {
+            iframeRef.current = frame;
+            if (project?.frameRef) project.frameRef.current = frame;
+          }}
+          title={title}
+          src={projectUrl}
+          sandbox={projectUrl ? "allow-scripts allow-forms" : undefined}
+          onLoad={project?.onLoad}
           className={classNames(
             {
               "border-0": true,

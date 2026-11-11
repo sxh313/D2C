@@ -11,8 +11,8 @@ import {
   LuRefreshCw,
   LuDownload,
 } from "react-icons/lu";
-import { useMemo, useState } from "react";
-import { AppState, Settings } from "../../types";
+import { MutableRefObject, ReactNode, useMemo, useState } from "react";
+import { AppState, EditorTheme, Settings } from "../../types";
 import CodeTab from "./CodeTab";
 import { Button } from "../ui/button";
 import { useAppStore } from "../../store/app-store";
@@ -23,6 +23,61 @@ import { downloadCode } from "./download";
 import { SelectAndEditToolbarButton } from "../select-and-edit/SelectAndEditControls";
 import { normalizeBabelCdn } from "../../lib/babelCdn";
 import ImageScanningPreview from "./ImageScanningPreview";
+import CodeMirror from "./CodeMirror";
+
+interface ProjectPreviewProps {
+  url: string;
+  files: { path: string; content: string }[];
+  selectedFile: number;
+  onFileChange: (index: number) => void;
+  view: "preview" | "code";
+  onViewChange: (view: "preview" | "code") => void;
+  frameRef: MutableRefObject<HTMLIFrameElement | null>;
+  onLoad: () => void;
+  onRefresh: () => void;
+  placeholder: ReactNode;
+  actions?: ReactNode;
+  selection?: ReactNode;
+}
+
+// The same upstream preview, tabs and CodeMirror now accept a built multi-file
+// project. Run state remains owned by the workbench; no synthetic HTML commits.
+export function ProjectPreviewPane(props: ProjectPreviewProps) {
+  const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
+  const [mode, setMode] = useState<"fit" | "actual">("fit");
+  const [scale, setScale] = useState(1);
+  const activeTab = props.view === "code" ? "code" : device;
+  const file = props.files[props.selectedFile] || props.files[0];
+  return <Tabs value={activeTab} onValueChange={(value) => {
+    props.onViewChange(value === "code" ? "code" : "preview");
+    if (value === "desktop" || value === "mobile") setDevice(value);
+  }} className="d2c-native-preview">
+    <div className="d2c-result-actions">
+      <TabsList aria-label="结果视图">
+        <TabsTrigger value="desktop"><FaDesktop /> 桌面预览</TabsTrigger>
+        <TabsTrigger value="mobile"><FaMobile /> 手机预览</TabsTrigger>
+        <TabsTrigger value="code"><FaCode /> 查看源码</TabsTrigger>
+      </TabsList>
+      {props.actions}
+    </div>
+    {props.view === "preview" && <div className="d2c-preview-controls">
+      <button type="button" aria-pressed={mode === "fit"} onClick={() => setMode("fit")}>适应面板{mode === "fit" ? ` · ${Math.round(scale * 100)}%` : ""}</button>
+      <button type="button" aria-pressed={mode === "actual"} onClick={() => setMode("actual")}>原始尺寸</button>
+      <span>{device === "desktop" ? "1440 × 900" : "390 × 844"}</span>
+      <button type="button" onClick={props.onRefresh}>重新加载预览</button>
+    </div>}
+    {(["desktop", "mobile"] as const).map((target) => <TabsContent key={target} value={target}>
+      {props.url ? <div className="d2c-native-viewport"><PreviewComponent code="" device={target} viewMode={mode} title="生成页面预览" onScaleChange={setScale}
+        project={{ url: props.url, viewport: target === "desktop" ? { width: 1440, height: 900 } : { width: 390, height: 844 }, frameRef: props.frameRef, onLoad: props.onLoad }} /></div> : props.placeholder}
+      {props.url && props.selection}
+    </TabsContent>)}
+    <TabsContent value="code">
+      <div className="d2c-file-tabs" role="group" aria-label="工程文件">{props.files.map((item, index) => <button type="button" key={item.path} aria-pressed={props.selectedFile === index} className={props.selectedFile === index ? "active" : ""} onClick={() => props.onFileChange(index)}>{item.path}</button>)}</div>
+      <p className="d2c-help">当前候选源码（只读）。修改页面请使用下方的修改要求；导出内容与本次构建一致。</p>
+      <CodeMirror key={file?.path} code={file?.content || ""} editorTheme={EditorTheme.COBALT} onCodeChange={() => {}} readOnly language={/\.html?$/.test(file?.path || "") ? "html" : "text"} label={`源码 ${file?.path || ""}`} className="d2c-native-code" />
+    </TabsContent>
+  </Tabs>;
+}
 
 function prepareHtmlForNewTab(code: string) {
   const html = normalizeBabelCdn(code);

@@ -416,3 +416,12 @@
 
 .d2c-material-fields { min-width: 0; margin: 0; padding: 0; border: 0; }
 .d2c-material-fields:disabled { opacity: .75; }
+
+.d2c-native-preview { min-width: 0; }
+.d2c-native-preview [role=tablist] { display: flex; flex-wrap: wrap; gap: 4px; height: auto; padding: 0; background: transparent; }
+.d2c-native-preview [role=tab] { gap: 6px; color: #536d89; }
+.d2c-native-preview [role=tab][data-state=active] { color: #274fc0; background: #fff; }
+.d2c-native-viewport { display: flex; height: min(75vh, 900px); min-height: 420px; overflow: hidden; border: 1px solid #dce5f0; border-radius: 10px; background: #edf1f7; }
+.d2c-native-code { max-height: 650px; overflow: auto; border: 1px solid #dce5f0; border-radius: 10px; }
+.d2c-native-code .cm-editor { min-height: 320px; font-size: 13px; }
+.d2c-native-code .cm-scroller { overflow: auto; }
