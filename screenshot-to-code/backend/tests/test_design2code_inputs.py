@@ -122,7 +122,9 @@ def test_source_set_confirmation_is_read_from_matching_record(tmp_path: Path, mo
     confirmation = {key: source[key] for key in ("source_set_revision", "source_set_hash")}
     assert client.post(path + "/confirm", json=confirmation).json()["confirmed"] is True
     assert client.get(path).json()["confirmed"] is True
-    assert storage.get_source_set(source["source_set_id"], source["source_set_revision"])["confirmed"] is True
+    stored = storage.get_source_set(source["source_set_id"], source["source_set_revision"])
+    assert stored is not None
+    assert stored["confirmed"] is True
     with storage.connect() as db:
         db.execute("UPDATE source_confirmations SET source_hash = ? WHERE set_id = ?", ("different", source["source_set_id"]))
     assert client.get(path).json()["confirmed"] is False
@@ -416,7 +418,8 @@ async def test_visual_comparison_selects_previous_built_candidate(tmp_path: Path
     monkeypatch.setattr(d2c_routes, "get_source_set", lambda *_args: {"sources": [{"input_id": "reference"}]})
     monkeypatch.setattr(d2c_routes, "get_input", lambda _id: {"input_type": "screenshot", "data": {"content_base64": base64.b64encode(image.getvalue()).decode()}})
     monkeypatch.setattr(d2c_routes, "get_settings", lambda: SimpleNamespace(runtime_dir=tmp_path))
-    assert (await d2c_routes.inspection_image("run_test", "mobile", "candidate", "previous")).path.parent.name == "candidate"
+    previous_image = await d2c_routes.inspection_image("run_test", "mobile", "candidate", "previous")
+    assert Path(previous_image.path).parent.name == "candidate"
     assert (await d2c_routes.visual_diff("run_test", "reference", "mobile", "candidate", "previous"))["mean_channel_difference"] == 0
     assert (await d2c_routes.visual_diff("run_test", "reference", "mobile", "candidate-2"))["mean_channel_difference"] == 255
     with pytest.raises(HTTPException) as mismatch:

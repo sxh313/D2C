@@ -8,6 +8,7 @@ import re
 import urllib.parse
 import urllib.request
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -23,6 +24,7 @@ import design2code.runner as runner
 import design2code.runs as runs
 import design2code.storage as storage
 from design2code.routes import router
+from design2code.settings import get_settings
 
 
 def bundle(entries: list[tuple[str, bytes]]) -> str:
@@ -150,7 +152,8 @@ def test_bundle_asset_survives_real_build_and_nested_preview(tmp_path: Path, mon
     with storage.connect() as db:
         db.execute("INSERT INTO runs (id,set_id,revision,source_hash,idempotency_key,request_hash,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
                    ("run_bundle_real", source["source_set_id"], 1, "hash", "bundle-real", "hash", "BUILDING", storage.now(), storage.now()))
-    settings = SimpleNamespace(runtime_dir=tmp_path, build_timeout=180, preview_host="127.0.0.1", preview_port_start=19380, preview_port_end=19400)
+    settings = replace(get_settings(), runtime_dir=tmp_path, build_timeout=180,
+                       preview_host="127.0.0.1", preview_port_start=19380, preview_port_end=19400)
     monkeypatch.setattr(runner, "get_settings", lambda: settings)
     files = runs.parse_files(json.dumps({"files": [
         {"path": "src/App.tsx", "content": 'import "./index.css"; export default function App() { return <div className="logo"/> }'},
@@ -161,10 +164,14 @@ def test_bundle_asset_survives_real_build_and_nested_preview(tmp_path: Path, mon
         url = runner.preview_url("run_bundle_real", settings)
         with urllib.request.urlopen(url) as response:
             html = response.read().decode()
-        css_path = re.search(r'href="([^\"]+\.css)"', html).group(1)
+        css_match = re.search(r'href="([^\"]+\.css)"', html)
+        assert css_match is not None, "The built page must reference its stylesheet."
+        css_path = css_match.group(1)
         with urllib.request.urlopen(urllib.parse.urljoin(url, css_path)) as response:
             css = response.read().decode()
-        image_path = re.search(r'url\(["\']?([^"\')]+logo\.png)', css).group(1)
+        image_match = re.search(r'url\(["\']?([^"\')]+logo\.png)', css)
+        assert image_match is not None, "The built stylesheet must retain the imported image."
+        image_path = image_match.group(1)
         with urllib.request.urlopen(urllib.parse.urljoin(urllib.parse.urljoin(url, css_path), image_path)) as response:
             assert response.headers.get_content_type() == "image/png"
             assert response.read() == png()
