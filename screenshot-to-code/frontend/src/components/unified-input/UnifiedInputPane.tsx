@@ -26,7 +26,7 @@ interface Props {
 
 type InputTab = "upload" | "url" | "text" | "import";
 
-function UnifiedInputPane({
+function NativeInputPane({
   doCreate,
   doCreateFromText,
   importFromCode,
@@ -136,6 +136,25 @@ function UnifiedInputPane({
       </Tabs>
     </div>
   );
+}
+
+type ProjectInputs = { screenshot: React.ReactNode; spec: React.ReactNode; figma: React.ReactNode;
+  counts: { screenshot: number; spec: number; figma: number } };
+
+function ProjectInputPane({ project }: { project: ProjectInputs }) {
+  const [active, setActive] = useState("screenshot");
+  return <Tabs value={active} onValueChange={setActive} className="d2c-unified-input">
+    <TabsList aria-label="设计资料类型" className="d2c-input-tab-list">
+      {([["screenshot", "截图"], ["spec", "Spec 需求"], ["figma", "Figma"]] as const).map(([key, label]) =>
+        <TabsTrigger key={key} value={key}>{label}{project.counts[key] ? ` · ${project.counts[key]}` : ""}</TabsTrigger>)}
+    </TabsList>
+    <p className="d2c-help">标签用于整理资料；已添加的各类资料会一起生成。</p>
+    {(["screenshot", "spec", "figma"] as const).map((key) => <TabsContent key={key} value={key} forceMount className="d2c-input-panel data-[state=inactive]:hidden">{project[key]}</TabsContent>)}
+  </Tabs>;
+}
+
+function UnifiedInputPane(props: Props | { project: ProjectInputs }) {
+  return "project" in props ? <ProjectInputPane project={props.project} /> : <NativeInputPane {...props} />;
 }
 
 function UploadIcon() {

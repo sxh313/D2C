@@ -1,17 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { LuArrowUpRight, LuClipboardPaste, LuFileCode, LuImagePlus, LuLayers, LuPlus, LuRefreshCw, LuX } from "react-icons/lu";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LuArrowUpRight, LuFileCode, LuLayers, LuPlus, LuRefreshCw, LuX } from "react-icons/lu";
 import { buildSelectedElementInstruction } from "../../components/select-and-edit/utils";
 import "./workbench.css";
 import { FigmaArtifacts } from "./FigmaArtifacts";
 import { ProjectPreviewPane } from "../../components/preview/PreviewPane";
 import { ProjectCodeEditor } from "./ProjectCodeEditor";
+import { useProjectStore } from "../../store/project-store";
+import { BuiltProjectRun as Run } from "../../store/built-project";
+import { HistoryTimeline, TimelineItem } from "../../components/history/HistoryDisplay";
+import UnifiedInputPane from "../../components/unified-input/UnifiedInputPane";
+import { ProjectUploadTab } from "../../components/unified-input/tabs/UploadTab";
+import { fileToDataURL } from "../../components/unified-input/file-reader";
 
 type ImageInput = { name: string; data: string };
 type Capabilities = { provider_configured: boolean; figma_mode: "mcp" | "rest"; figma_configured: boolean; generation_available: boolean; conversion_build_available?: boolean; configuration_issues: string[]; token_limit_configured: boolean; cost_limit_configured: boolean };
 type SourceSet = { source_set_id: string; source_set_revision: number; source_set_hash: string };
 type PendingRun = { sourceSet: SourceSet; key: string };
 type PendingRepair = { runId: string; instruction: string; key: string; draftText?: string };
-type Run = { run_id: string; status: string; error: string | null; model_requests: number; repairs: number; result: { candidate_name?: string; engine?: string; engine_version?: string; agent_run_id?: string; provider?: string; model?: string; tools?: { type?: string; name?: string; ok?: boolean }[]; previous_candidate?: { candidate_name?: string; files: { path: string; content: string }[]; checks?: { id: string; status: string; message: string }[] }; files: { path: string; content: string }[]; checks?: { id: string; status: string; message: string }[]; build_details?: string } | null };
 type RecentRun = { run_id: string; status: string; model_requests: number; repairs: number; created_at: string };
 type Dimension = "layout" | "style" | "content" | "behavior";
 type SelectedElement = { html: string; context: string; label: string };
@@ -82,13 +87,8 @@ function jsonPost(body: unknown, headers: Record<string, string> = {}): RequestI
   return { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) };
 }
 
-function readFile(file: File): Promise<ImageInput> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => typeof reader.result === "string" ? resolve({ name: file.name || "粘贴的截图.png", data: reader.result }) : reject(new Error("图片读取失败"));
-    reader.onerror = () => reject(new Error("图片读取失败"));
-    reader.readAsDataURL(file);
-  });
+async function readFile(file: File): Promise<ImageInput> {
+  return { name: file.name || "粘贴的截图.png", data: await fileToDataURL(file) };
 }
 
 async function readScreenshot(file: File): Promise<ImageInput> {
@@ -268,7 +268,10 @@ function VisualReview({ runId, candidate, version = "current" }: { runId: string
 }
 
 export default function D2CWorkbench() {
-  const [images, setImages] = useState<ImageInput[]>([]);
+  const references = useProjectStore((state) => state.referenceImages);
+  const names = useProjectStore((state) => state.referenceImageNames);
+  const images = useMemo(() => references.map((data, index) => ({ data, name: names[index] || `截图 ${index + 1}` })), [references, names]);
+  const setImages = useProjectStore((state) => state.setReferenceImageInputs);
   const [spec, setSpec] = useState("");
   const [searchRule, setSearchRule] = useState<SearchRule>(emptySearchRule);
   const [dialogRule, setDialogRule] = useState<DialogRule>(emptyDialogRule);
@@ -279,7 +282,8 @@ export default function D2CWorkbench() {
   const [figmaChecking, setFigmaChecking] = useState(false);
   const [bundle, setBundle] = useState<ImageInput | null>(null);
   const [bundleReading, setBundleReading] = useState(false);
-  const [instruction, setInstruction] = useState("");
+  const instruction = useProjectStore((state) => state.initialPrompt);
+  const setInstruction = useProjectStore((state) => state.setInitialPrompt);
   const [authority, setAuthority] = useState<Record<Dimension, string>>({ layout: "", style: "", content: "", behavior: "" });
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [connectionError, setConnectionError] = useState("");
@@ -288,7 +292,10 @@ export default function D2CWorkbench() {
   const [pendingRun, setPendingRun] = useState<PendingRun | null>(null);
   const [pendingRepair, setPendingRepair] = useState<PendingRepair | null>(null);
   const [repairError, setRepairError] = useState("");
-  const [run, setRun] = useState<Run | null>(null);
+  const run = useProjectStore((state) => state.builtRun);
+  const setRun = useProjectStore((state) => state.setBuiltRun);
+  const builtVersion = useProjectStore((state) => state.builtVersion);
+  const setBuiltVersion = useProjectStore((state) => state.setBuiltVersion);
   const [restoreId, setRestoreId] = useState(() => {
     try { return window.sessionStorage.getItem("d2c_restore_id") || ""; }
     catch { return ""; }
@@ -322,16 +329,13 @@ export default function D2CWorkbench() {
   const [error, setError] = useState("");
   const [imageError, setImageError] = useState("");
   const [imageReads, setImageReads] = useState(0);
-  const [draggingImage, setDraggingImage] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
   const [draftError, setDraftError] = useState("");
   const [draftSaveState, setDraftSaveState] = useState<"saving" | "saved">("saving");
   const [draftStorageAvailable, setDraftStorageAvailable] = useState(true);
   const draftWrites = useRef<Promise<void>>(Promise.resolve());
-  const imagesRef = useRef<ImageInput[]>([]);
+  const imagesRef = useRef<ImageInput[]>(images);
   const bundleReadVersion = useRef(0);
-  const pendingPastedFiles = useRef<File[]>([]);
-  const fileRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<HTMLIFrameElement>(null);
   const selectionToken = useRef("");
   const previousPreviewRequest = useRef(0);
@@ -355,7 +359,7 @@ export default function D2CWorkbench() {
     }).catch(() => { if (active) { setDraftStorageAvailable(false); setDraftError("无法读取或保存本机草稿；请检查浏览器存储设置。"); } })
       .finally(() => { if (active) setDraftReady(true); });
     return () => { active = false; };
-  }, []);
+  }, [setImages, setInstruction]);
 
   useEffect(() => {
     if (!draftReady || !draftStorageAvailable) return;
@@ -389,41 +393,18 @@ export default function D2CWorkbench() {
       if (messages.length) setImageError(messages.join(" "));
     } catch { setImageError("无法读取图片，请重新选择。"); }
     finally { setImageReads((count) => count - 1); }
-  }, []);
-
-  useEffect(() => {
-    const handlePaste = (event: ClipboardEvent) => {
-      const files = Array.from(event.clipboardData?.items || []).filter((item) => item.type.startsWith("image/"))
-        .map((item) => item.getAsFile()).filter((file): file is File => file !== null);
-      if (files.length) {
-        event.preventDefault();
-        if (draftReady) void addImages(files);
-        else pendingPastedFiles.current.push(...files);
-      }
-    };
-    document.addEventListener("paste", handlePaste);
-    return () => document.removeEventListener("paste", handlePaste);
-  }, [addImages, draftReady]);
-
-  useEffect(() => {
-    if (!draftReady || pendingPastedFiles.current.length === 0) return;
-    const files = pendingPastedFiles.current.splice(0);
-    void addImages(files);
-  }, [addImages, draftReady]);
+  }, [setImages]);
 
   useEffect(() => {
     // Avoid navigating away and losing the current task when a file misses the drop zone.
     const preventFileNavigation = (event: DragEvent) => {
       if (Array.from(event.dataTransfer?.types || []).includes("Files")) event.preventDefault();
     };
-    const clearDrag = () => setDraggingImage(false);
     window.addEventListener("dragover", preventFileNavigation);
     window.addEventListener("drop", preventFileNavigation);
-    window.addEventListener("drop", clearDrag);
     return () => {
       window.removeEventListener("dragover", preventFileNavigation);
       window.removeEventListener("drop", preventFileNavigation);
-      window.removeEventListener("drop", clearDrag);
     };
   }, []);
 
@@ -441,7 +422,7 @@ export default function D2CWorkbench() {
         ? "上次任务记录不存在或已删除；请从最近任务中选择其他记录，或按任务 ID 恢复。"
         : "暂时无法恢复上次任务；服务恢复后可点击重新检查服务，或按任务 ID 恢复。");
     }
-  }, []);
+  }, [setRun]);
   const refreshCapabilities = useCallback(async () => {
     try {
       setCapabilities(await request<Capabilities>("/capabilities"));
@@ -501,7 +482,7 @@ export default function D2CWorkbench() {
     };
     timer = window.setTimeout(() => void poll(), 1800);
     return () => { active = false; window.clearTimeout(timer); };
-  }, [pollingRunId, pollingStatus]);
+  }, [pollingRunId, pollingStatus, setRun]);
 
   const currentRunId = run?.run_id;
   const currentStatus = run?.status;
@@ -781,7 +762,14 @@ export default function D2CWorkbench() {
   const tabSummary = !tabFilled ? "未设置" : tabFilled < 3 ? "未填写完整" : tabRule.initial_text.trim() === tabRule.selected_text.trim() ? "示例文本重复" : "已设置";
   const awaitingRepairedCandidate = !!run && run.repairs > 0 && ["REPAIRING", "BUILDING"].includes(run.status) && run.result?.candidate_name !== "candidate-2";
   const failedChecks = run?.result?.checks?.filter((check) => check.status === "FAIL") || [];
-  const files = run?.result?.files || [];
+  const files = (builtVersion === "previous" ? previous?.files : run?.result?.files) || [];
+  const versionItems: TimelineItem[] = run?.result?.files.length ? [
+    ...(hasPreviousBuilt && previous ? [{ hash: "previous", type: "修改前", summary: `修改前工程 · ${previous.engine || "已保存"}`,
+      parentVersion: null, selectedElementTag: null, images: [], videos: [] }] : []),
+    { hash: "current", type: run.result.revision?.kind === "manual" ? "手写修改" : previous ? "模型修改" : run.result.engine === "figma-to-code" ? "Figma 转换" : "生成",
+      summary: `当前工程 · ${run.result.candidate_name || "candidate"} · ${statusText[run.status] || run.status}`,
+      parentVersion: null, selectedElementTag: null, images: [], videos: [] },
+  ] : [];
   if (!draftReady) return <main className="d2c-shell">正在恢复本机草稿…</main>;
   return <div className="d2c-shell">
     <header className="d2c-header"><div className="d2c-brand"><span className="d2c-brand-mark"><LuLayers /></span><div><strong>Design2Code</strong><small>本地设计工作台</small></div></div><div className="d2c-header-right"><span className={`d2c-dot ${capabilities?.provider_configured ? "ready" : ""}`} />{capabilities?.provider_configured ? "模型已配置" : "检查模型配置"}<span className="d2c-local">本机运行</span></div></header>
@@ -790,14 +778,13 @@ export default function D2CWorkbench() {
         <p className="d2c-input-guide">添加至少一种资料；可组合截图、需求说明、Figma 和项目包。</p>
         <p className="d2c-draft-status" role="status">{!draftReady ? "正在读取本机草稿…" : draftError ? "草稿未保存" : imageReads > 0 ? "图片读取中" : draftSaveState === "saving" ? "草稿保存中…" : "资料和修改草稿已保存到当前浏览器"}</p>
         <fieldset className="d2c-material-fields" disabled={!draftReady} aria-busy={!draftReady}>
+        <UnifiedInputPane project={{ counts: { screenshot: images.length, spec: Number(!!spec.trim()), figma: Number(!!figma.trim()) + Number(!!bundle) }, screenshot: <>
         <label className="d2c-label">截图 <span>已添加 {images.length} / 3 张</span></label>
-        <div className={`d2c-drop ${draggingImage ? "is-dragging" : ""}`} onDragOver={(event) => { event.preventDefault(); if (draftReady && Array.from(event.dataTransfer.types).includes("Files")) setDraggingImage(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDraggingImage(false); }} onDrop={(event) => { event.preventDefault(); setDraggingImage(false); if (draftReady) void addImages(Array.from(event.dataTransfer.files)); }}>
-          <input ref={fileRef} type="file" accept="image/png,image/jpeg" multiple hidden onChange={(event) => { void addImages(Array.from(event.target.files || [])); event.target.value = ""; }} />
-          <div className="d2c-drop-icon"><LuImagePlus /></div><strong>拖入截图，或 <button type="button" onClick={() => fileRef.current?.click()}>选择图片</button></strong><span><LuClipboardPaste /> 也可以直接 Ctrl + V 粘贴</span>
-        </div>
+        <ProjectUploadTab onFiles={(files) => { void addImages(files); }} ready={draftReady} />
         {imageReads > 0 && <p className="d2c-help" role="status">正在读取截图…</p>}
         {imageError && <div className="d2c-error" role="alert">{imageError}</div>}
         {images.length > 0 && <div className="d2c-thumbnails">{images.map((image, index) => <ScreenshotThumbnail key={`${image.name}-${index}`} image={image} index={index} onRemove={() => { imagesRef.current = imagesRef.current.filter((_, i) => i !== index); setImages(imagesRef.current); }} />)}</div>}
+        </>, spec: <>
         <label className="d2c-label" htmlFor="d2c-spec">需求说明 <span>支持普通文字和 Markdown</span></label><textarea id="d2c-spec" value={spec} onChange={(event) => setSpec(event.target.value)} placeholder={'例如：任务列表支持搜索、状态筛选和新建弹窗。'} rows={4} />
         <details className="d2c-check-options"><summary>高级验收设置（可选）</summary><p className="d2c-help">需要自动检查特定交互时再填写。</p><details><summary>搜索功能验收 — {searchSummary}</summary><p className="d2c-help">在生成前填写一组可验证示例。两条文本初始都应显示；搜索后第一条保留、第二条隐藏。输入框提示文字和示例文本需与页面完全一致。此检查只覆盖这一组示例，规则会保存在本机草稿中。</p>
           {([["placeholder", "搜索框提示文字", "例如：搜索任务"], ["query", "要输入的搜索词", "例如：邮件"], ["visible_text", "搜索后保留的完整文本", "例如：查看邮件"], ["hidden_text", "搜索后隐藏的完整文本", "例如：整理文件"]] as const).map(([key, label, example]) => <label className="d2c-label" key={key}>{label}<input value={searchRule[key]} maxLength={key === "visible_text" || key === "hidden_text" ? 150 : 100} placeholder={example} onChange={(event) => setSearchRule((current) => ({ ...current, [key]: event.target.value }))} /></label>)}
@@ -811,6 +798,7 @@ export default function D2CWorkbench() {
           {([["tab_name", "目标标签名称", "例如：已完成"], ["initial_text", "切换前显示的完整文本", "例如：待办任务"], ["selected_text", "切换后显示的完整文本", "例如：完成任务"]] as const).map(([key, label, example]) => <label className="d2c-label" key={key}>{label}<input value={tabRule[key]} maxLength={key === "tab_name" ? 100 : 150} placeholder={example} onChange={(event) => setTabRule((current) => ({ ...current, [key]: event.target.value }))} /></label>)}
           <button type="button" disabled={!tabFilled} onClick={() => setTabRule(emptyTabRule)}>清除标签页验收规则</button>
         </details></details>
+        </>, figma: <>
         <label className="d2c-label" htmlFor="d2c-figma">Figma 节点链接 <span>{!capabilities ? "正在检查配置" : capabilities.figma_mode === "mcp" ? (capabilities.figma_configured ? "MCP 模式；请在 Figma 中运行插件" : "请先安装 MCP Bridge") : (capabilities.figma_configured ? "REST 令牌已配置" : "需要配置访问令牌")}</span></label><input id="d2c-figma" value={figma} onChange={(event) => setFigma(event.target.value)} placeholder="https://www.figma.com/design/…?node-id=…" />
         {capabilities?.figma_mode === "mcp" && <div className="d2c-help"><button type="button" disabled={figmaChecking} onClick={() => void checkFigmaConnection()}>{figmaChecking ? "正在检查…" : "检查 Figma 插件连接"}</button>{figmaConnection && <p role="status">{figmaConnection}</p>}</div>}
         {capabilities?.figma_mode === "mcp" && <details className="d2c-advanced"><summary>插件已连接，但无法导入？</summary><div className="d2c-help"><p>开发插件重新运行后，可能需要重新关联文件：</p><ol><li>在 Figma Desktop 打开要导入的文件，运行 MCP Bridge 插件，并确认只连接了一个插件会话。</li><li>在项目根目录打开 PowerShell，输入 <code>.\Bind-FigmaBridge.ps1</code> 并回车。</li><li>出现 <code>FigmaUrl:</code> 提示时，粘贴当前文件的 Figma 链接并回车。请确认链接对应 Figma 中打开的文件。</li><li>显示绑定成功后，保持插件打开，在上方填写带节点标识的链接，再重新导入。</li></ol><p>如果连接了多个插件会话，脚本会列出会话并提示使用 <code>-SessionKey</code> 指定；请根据当前文件确认后再绑定。</p></div></details>}
@@ -828,7 +816,8 @@ export default function D2CWorkbench() {
           void readFile(file).then((value) => { if (version === bundleReadVersion.current) { setBundle(value); setError(""); } }).catch(() => { if (version === bundleReadVersion.current) setError("项目包读取失败。"); }).finally(() => { if (version === bundleReadVersion.current) setBundleReading(false); });
         }} />
         {bundleReading && <p className="d2c-help" role="status">正在读取项目包…</p>}
-        {bundle && <p className="d2c-help">已选择 {bundle.name} <button type="button" onClick={() => { bundleReadVersion.current += 1; setBundleReading(false); setBundle(null); }}>移除</button>。源码和图片仅作为参考，包内脚本不会执行。</p>}</details>
+        {bundle && <p className="d2c-help">已选择 {bundle.name} <button type="button" onClick={() => { bundleReadVersion.current += 1; setBundleReading(false); setBundle(null); }}>移除</button>。React/Vite 源码和图片作为工程起点，包内脚本不会执行。</p>}</details>
+        </> }} />
         <label className="d2c-label" htmlFor="d2c-instruction">生成指令 <span>说明各份资料的用途</span></label><textarea id="d2c-instruction" aria-describedby="d2c-language-hint" value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="例如：布局按 Figma，颜色参考截图，交互按需求说明。" rows={3} />
         <p id="d2c-language-hint" className="d2c-help">生成页面默认使用简体中文；如需保留设计稿原文或使用其他语言，请在指令中说明。</p>
         <details><summary>选择各维度的参考来源（可选）</summary>
@@ -882,15 +871,19 @@ export default function D2CWorkbench() {
         <details><summary>按任务 ID 恢复</summary><label className="d2c-label" htmlFor="d2c-restore">完整任务 ID</label><input id="d2c-restore" value={restoreId} onChange={(event) => { const value = event.target.value; setRestoreId(value); setRestoreError(""); try { window.sessionStorage.setItem("d2c_restore_id", value); } catch { /* Recovery remains available without session storage. */ } }} placeholder="run_…" aria-invalid={!!restoreError} aria-describedby={restoreError ? "d2c-restore-error" : undefined} /><button type="button" disabled={isRunning || !restoreId.trim()} onClick={() => void handleRestore()}>恢复任务</button>{restoreError && <div id="d2c-restore-error" className="d2c-error" role="alert">{restoreError}</div>}</details>
         {!run && <div className="d2c-empty"><div className="d2c-paper"><LuFileCode /><span>页面预览</span><i /><i /><i /></div><strong>你的页面会显示在这里</strong><p>添加一种或多种资料，填写生成指令后开始。</p><div><LuPlus /> 截图 <LuPlus /> 需求说明 <LuPlus /> Figma</div></div>}
         {run && <div className="d2c-result-content">{awaitingRepairedCandidate && <p className="d2c-help" role="status">修改正在进行；当前显示的源码和检查结果属于修改前版本，新版本的构建与检查结果尚未完成。</p>}{run.status === "BUILDING" && run.result?.candidate_name === "candidate-2" && <p className="d2c-help" role="status">修改后的源码已保存，正在构建；检查结果尚未完成。</p>}{run.error && <div className="d2c-error">{run.error}</div>}{["FAILED", "CANCELLED"].includes(run.status) && !!run.result?.files?.length && <p className="d2c-help">任务未完成时，工程包可能不完整或无法运行；“下载已保存源码”仅包含模型源码，不包含完整工程、依赖或参考图片。请查看检查结果。</p>}{canRecoverPrevious && <section className="d2c-previous"><strong>修改后的工程未完成</strong><p>可以查看或下载修改前已构建通过的版本；下方检查结果属于本次修改。</p><button type="button" onClick={() => void showPreviousPreview()}>查看修改前页面</button> <a href={`${api}/runs/${run.run_id}/export?version=previous`}>下载修改前工程</a>{previousPreviewError && <p role="alert">{previousPreviewError}</p>}{previousPreview && <iframe title="修改前页面预览" className="d2c-preview" sandbox="allow-scripts allow-forms" src={previousPreview} />}</section>}{canPreview && !["READY_FOR_REVIEW", "COMPLETE_LOCAL"].includes(run.status) && <p className="d2c-help" role="status">当前显示的是此前构建通过的版本，本次修改未完成或结果未知。</p>}{failedChecks.length > 0 && <div className="d2c-error" role="alert">{awaitingRepairedCandidate ? "修改前版本有" : "有"} {failedChecks.length} 项检查失败，请查看检查结果后决定是否修改。 <a href="#d2c-check-results">查看失败项</a></div>}<div className="d2c-run-meta">任务 {run.run_id} <span>已占用模型请求额度 {run.model_requests} 次</span></div>{run.result?.engine && <p className="d2c-help">执行引擎：{run.result.engine} · 模型：{run.result.model || "未记录"} · 工具事件：{run.result.tools?.length || 0} 次{run.result.agent_run_id ? ` · Agent 记录 ${run.result.agent_run_id}` : ""}</p>}<p className="d2c-help">额度在请求准备时占用；预检失败或结果未知时，不能据此确认供应商是否收到请求或产生费用。</p><RunHistory key={run.run_id} runId={run.run_id} />{files.length > 0 ? <><ProjectPreviewPane
-  key={run.run_id}
-  url={preview} files={files} selectedFile={selectedFile} onFileChange={setSelectedFile}
-  codeEditor={<ProjectCodeEditor key={`${run.run_id}:${run.result?.candidate_name || "candidate"}`} runId={run.run_id}
+  key={`${run.run_id}:${builtVersion}`}
+  history={<section className="d2c-candidate-history" aria-label="候选版本"><h3>版本记录</h3><HistoryTimeline chinese items={versionItems} head={builtVersion} disabled={isRunning}
+    onSelect={(version) => { setBuiltVersion(version === "previous" ? "previous" : "current"); setSelectedFile(0); setView("preview"); if (version === "previous") void showPreviousPreview(); }} />
+    {builtVersion === "previous" && <p className="d2c-help" role="status">正在查看修改前的源码与预览。下方检查报告属于当前版本；下载修改前工程可保留此版本。</p>}
+  </section>}
+  url={builtVersion === "previous" ? previousPreview : preview} files={files} selectedFile={selectedFile} onFileChange={setSelectedFile}
+  codeEditor={builtVersion === "current" ? <ProjectCodeEditor key={`${run.run_id}:${run.result?.candidate_name || "candidate"}`} runId={run.run_id}
     enabled={!isRunning && !busy && !pendingRepair && !pendingRun && run.repairs < 1}
-    onSubmitted={async () => { setRun(await request<Run>(`/runs/${run.run_id}`)); setView("preview"); }} />}
+    onSubmitted={async () => { setRun(await request<Run>(`/runs/${run.run_id}`)); setView("preview"); }} /> : undefined}
   view={view} onViewChange={setView} frameRef={previewRef}
   onLoad={() => { setPreviewReady(true); setSelecting(false); setSelectedElement(null); selectionToken.current = ""; }}
   onRefresh={() => { setPreviewReady(false); setPreviewAttempt((attempt) => attempt + 1); }}
-  actions={<>{!!run.result?.checks?.length && <a href="#d2c-check-results">检查结果</a>}{["FAILED", "CANCELLED"].includes(run.status) && <a href={`${api}/runs/${run.run_id}/saved-source`}>下载已保存源码</a>}{!run.result?.checks?.some((check) => check.id === "build" && check.status === "NOT_RUN") && (run.status !== "FAILED" || !!run.result?.checks?.some((check) => check.id === "build")) && (["READY_FOR_REVIEW", "COMPLETE_LOCAL", "FAILED"].includes(run.status) || (["UNKNOWN_EXTERNAL", "CANCELLED"].includes(run.status) && hasBuiltCandidate)) && <a className="d2c-export" href={`${api}/runs/${run.run_id}/export`} onClick={() => setExportRequestedFor(run.run_id)}>{run.result?.checks?.some((check) => check.id === "build" && check.status === "FAIL") ? "下载工程（构建失败）" : "下载工程"}</a>}</>}
+  actions={builtVersion === "previous" ? <a className="d2c-export" href={`${api}/runs/${run.run_id}/export?version=previous`}>下载修改前工程</a> : <>{!!run.result?.checks?.length && <a href="#d2c-check-results">检查结果</a>}{["FAILED", "CANCELLED"].includes(run.status) && <a href={`${api}/runs/${run.run_id}/saved-source`}>下载已保存源码</a>}{!run.result?.checks?.some((check) => check.id === "build" && check.status === "NOT_RUN") && (run.status !== "FAILED" || !!run.result?.checks?.some((check) => check.id === "build")) && (["READY_FOR_REVIEW", "COMPLETE_LOCAL", "FAILED"].includes(run.status) || (["UNKNOWN_EXTERNAL", "CANCELLED"].includes(run.status) && hasBuiltCandidate)) && <a className="d2c-export" href={`${api}/runs/${run.run_id}/export`} onClick={() => setExportRequestedFor(run.run_id)}>{run.result?.checks?.some((check) => check.id === "build" && check.status === "FAIL") ? "下载工程（构建失败）" : "下载工程"}</a>}</>}
   placeholder={<div className="d2c-preview-placeholder">{run.status === "FAILED" && !canPreview ? "任务未完成，暂时无法预览。请查看错误信息和检查结果。" : previewError ? <><p role="alert">预览启动失败：{previewError}</p><button type="button" onClick={() => setPreviewAttempt((attempt) => attempt + 1)}>重试预览</button></> : "等待构建并启动预览。"}</div>}
   selection={<>{run.status === "READY_FOR_REVIEW" && run.repairs < 1 && run.model_requests < 2 && <div><button type="button" disabled={!previewReady} onClick={toggleSelection}>{selecting ? "取消选取" : "在预览中选取元素"}</button>{selecting && <span> 请点击预览中的元素</span>}{selectedElement && <p>已选：{selectedElement.label || "页面元素"} <button type="button" onClick={() => setSelectedElement(null)}>清除</button></p>}</div>}</>}
 />{exportRequestedFor === run.run_id && <p className="d2c-help" role="status">已请求下载，打包可能需要一些时间；请查看浏览器下载列表确认是否完成。</p>}{canPreview && <VisualReview runId={run.run_id} candidate={run.result?.candidate_name} />}{hasPreviousBuilt && <VisualReview runId={run.run_id} candidate={previous?.candidate_name} version="previous" />}{run.status === "READY_FOR_REVIEW" && hasBuiltCandidate && <ManualReview key={`${run.run_id}:${run.result?.candidate_name || "candidate"}`} runId={run.run_id} candidate={run.result?.candidate_name} />}{!!run.result?.checks?.length && <section id="d2c-check-results" className="d2c-check-results" aria-label="检查结果"><h3>{awaitingRepairedCandidate ? "修改前版本的检查结果" : "检查结果"}</h3>{run.result.checks.map((check) => <div className="d2c-check" key={check.id}><strong data-status={check.status}>{checkStatusText[check.status] || check.status}</strong> {check.message}</div>)}</section>}{run.result?.build_details && <details><summary>构建详情</summary><pre className="d2c-code">{run.result.build_details}</pre></details>}{["READY_FOR_REVIEW", "FAILED"].includes(run.status) && run.repairs < 1 && run.model_requests < 2 && <div className="d2c-repair"><label htmlFor="d2c-repair">需要修改什么？</label><textarea id="d2c-repair" rows={2} value={repairInstruction} onChange={(event) => updateRepairDraft(run.run_id, event.target.value)} placeholder="例如：将主按钮改为蓝色，保持其他布局。" /><button disabled={busy || !!pendingRepair || !repairInstruction.trim()} onClick={() => void handleRepair()}>修改页面（剩余 1 次）</button></div>}</> : <><p className="d2c-help">{statusText[run.status] || "正在处理"}</p>{!!run.result?.checks?.length && <section className="d2c-check-results" aria-label="检查结果"><h3>{awaitingRepairedCandidate ? "修改前版本的检查结果" : "检查结果"}</h3>{run.result.checks.map((check) => <div className="d2c-check" key={check.id}><strong data-status={check.status}>{checkStatusText[check.status] || check.status}</strong> {check.message}</div>)}</section>}{run.status === "FAILED" && run.result && run.repairs < 1 && run.model_requests < 2 && <div className="d2c-repair"><label htmlFor="d2c-repair-invalid">生成内容无效，可提交一次修改要求</label><textarea id="d2c-repair-invalid" rows={2} value={repairInstruction} onChange={(event) => updateRepairDraft(run.run_id, event.target.value)} placeholder="例如：修正返回格式，生成完整的页面文件。" /><button disabled={busy || !!pendingRepair || !repairInstruction.trim()} onClick={() => void handleRepair()}>修复生成结果（剩余 1 次）</button></div>}</>}</div>}

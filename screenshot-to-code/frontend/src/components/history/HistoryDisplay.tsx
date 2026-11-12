@@ -3,11 +3,13 @@ import { useProjectStore } from "../../store/project-store";
 import { BsChevronDown, BsChevronRight } from "react-icons/bs";
 import { useState, useRef, useEffect, useCallback } from "react";
 
+export type TimelineItem = Pick<RenderedHistoryItem, "hash" | "type" | "summary" | "selectedElementTag" | "parentVersion" | "images" | "videos">;
+
 function MediaThumbnail({
   item,
   onPlayClick,
 }: {
-  item: RenderedHistoryItem;
+  item: TimelineItem;
   onPlayClick?: () => void;
 }) {
   const firstImage = item.images[0];
@@ -58,7 +60,7 @@ function ExpandedMedia({
   item,
   autoPlayVideo,
 }: {
-  item: RenderedHistoryItem;
+  item: TimelineItem;
   autoPlayVideo?: boolean;
 }) {
   const hasImages = item.images.length > 0;
@@ -109,6 +111,15 @@ function ExpandedMedia({
 
 export default function HistoryDisplay() {
   const { commits, head, setHead } = useProjectStore();
+  const history = Object.values(commits).sort((a, b) => new Date(a.dateCreated).getTime() - new Date(b.dateCreated).getTime());
+  return <HistoryTimeline items={renderHistory(history)} head={head} onSelect={setHead} />;
+}
+
+// Both native HTML commits and server-backed multi-file candidates use the
+// same selection, expansion and media UI. No HTML-only commit is synthesized.
+export function HistoryTimeline({ items: renderedHistory, head, onSelect, disabled = false, chinese = false }: {
+  items: TimelineItem[]; head: string | null; onSelect: (hash: string) => void; disabled?: boolean; chinese?: boolean;
+}) {
   const [expandedHash, setExpandedHash] = useState<string | null>(null);
   const [autoPlayHash, setAutoPlayHash] = useState<string | null>(null);
 
@@ -123,15 +134,6 @@ export default function HistoryDisplay() {
     setExpandedHash(hash);
     setAutoPlayHash(hash);
   }, []);
-
-  // Put all commits into an array and sort by created date (oldest first)
-  const flatHistory = Object.values(commits).sort(
-    (a, b) =>
-      new Date(a.dateCreated).getTime() - new Date(b.dateCreated).getTime()
-  );
-
-  // Annotate history items with a summary, parent version, etc.
-  const renderedHistory = renderHistory(flatHistory);
 
   if (renderedHistory.length === 0) return null;
 
@@ -154,7 +156,10 @@ export default function HistoryDisplay() {
           >
             <div
               className="flex items-center gap-3 px-3 py-2.5 cursor-pointer"
-              onClick={() => setHead(item.hash)}
+              role="button" tabIndex={disabled ? -1 : 0} aria-disabled={disabled} aria-current={isActive ? "true" : undefined}
+              aria-label={`${chinese ? "查看版本" : "View version"} ${versionNumber}：${item.summary}`}
+              onClick={() => { if (!disabled) onSelect(item.hash); }}
+              onKeyDown={(event) => { if (!disabled && (event.key === "Enter" || event.key === " ") && event.target === event.currentTarget) { event.preventDefault(); onSelect(item.hash); } }}
             >
               {/* Version number badge */}
               <span
@@ -189,7 +194,7 @@ export default function HistoryDisplay() {
                   </span>
                   {item.parentVersion !== null && (
                     <span className="text-[10px] text-gray-400 dark:text-gray-500">
-                      from v{item.parentVersion}
+                      {chinese ? "基于版本 " : "from v"}{item.parentVersion}
                     </span>
                   )}
                 </div>
@@ -215,6 +220,7 @@ export default function HistoryDisplay() {
               {/* Expand button */}
               {(hasMedia || item.summary.length > 30) && (
                 <button
+                  type="button" aria-label={chinese ? `${isExpanded ? "收起" : "展开"}版本 ${versionNumber}` : `${isExpanded ? "Collapse" : "Expand"} version ${versionNumber}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     setExpandedHash(isExpanded ? null : item.hash);

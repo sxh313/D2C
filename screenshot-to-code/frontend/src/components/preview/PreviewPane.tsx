@@ -39,6 +39,7 @@ interface ProjectPreviewProps {
   actions?: ReactNode;
   selection?: ReactNode;
   codeEditor?: ReactNode;
+  history?: ReactNode;
 }
 
 // The same upstream preview, tabs and CodeMirror now accept a built multi-file
@@ -53,6 +54,7 @@ export function ProjectPreviewPane(props: ProjectPreviewProps) {
     props.onViewChange(value === "code" ? "code" : "preview");
     if (value === "desktop" || value === "mobile") setDevice(value);
   }} className="d2c-native-preview">
+    {props.history}
     <div className="d2c-result-actions">
       <TabsList aria-label="结果视图">
         <TabsTrigger value="desktop"><FaDesktop /> 桌面预览</TabsTrigger>

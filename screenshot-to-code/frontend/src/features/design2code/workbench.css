@@ -151,6 +151,13 @@
 .d2c-drop.is-dragging { background: #e2f3f5; border-color: #216780; box-shadow: 0 0 0 3px #80bccb55; }
 
 /* The workbench is a canvas: keep inputs legible and give the result room. */
+.d2c-input-tab-list { display: flex; width: 100%; height: auto; gap: 4px; margin-bottom: 8px; padding: 4px; background: #edf4f7; border-radius: 8px; }
+.d2c-input-tab-list button { flex: 1; min-height: 36px; white-space: nowrap; }
+.d2c-input-panel[data-state=inactive] { display: none; }
+.d2c-candidate-history { margin-bottom: 16px; padding: 12px; border: 1px solid #dce8ed; border-radius: 10px; background: #f8fbfc; }
+.d2c-candidate-history h3 { margin: 0 0 8px; font-size: 13px; }
+.d2c-candidate-history [role=button][aria-disabled=true] { cursor: wait; opacity: .6; }
+.d2c-candidate-history [role=button]:focus-visible { outline: 3px solid #3984a7; outline-offset: 2px; }
 .d2c-shell { background: #edf3f6; color: #203d50; }
 .d2c-header { height: 68px; background: #fbfdfe; }
 .d2c-brand-mark { border-radius: 10px; background: #205f79; }

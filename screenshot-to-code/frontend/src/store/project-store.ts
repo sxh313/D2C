@@ -8,6 +8,7 @@ import {
 } from "../components/commits/types";
 import { PromptAsset } from "../types";
 import { useAppStore } from "./app-store";
+import { BuiltProjectRun } from "./built-project";
 
 // Store for app-wide state
 interface ProjectStore {
@@ -16,11 +17,20 @@ interface ProjectStore {
   setInputMode: (mode: "image" | "video" | "text") => void;
   referenceImages: string[];
   setReferenceImages: (images: string[]) => void;
+  referenceImageNames: string[];
+  setReferenceImageInputs: (images: { name: string; data: string }[]) => void;
   initialPrompt: string;
   setInitialPrompt: (prompt: string) => void;
   assetsById: Record<string, PromptAsset>;
   upsertPromptAssets: (assets: PromptAsset[]) => void;
   resetPromptAssets: () => void;
+
+  // Built projects use actual server Run snapshots, rather than fabricated
+  // single-HTML variants. This is the product's canonical current Run/head.
+  builtRun: BuiltProjectRun | null;
+  setBuiltRun: (run: BuiltProjectRun | null | ((previous: BuiltProjectRun | null) => BuiltProjectRun | null)) => void;
+  builtVersion: "current" | "previous";
+  setBuiltVersion: (version: "current" | "previous") => void;
 
   // Outputs
   commits: Record<string, Commit>;
@@ -88,7 +98,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   inputMode: "image",
   setInputMode: (mode) => set({ inputMode: mode }),
   referenceImages: [],
-  setReferenceImages: (images) => set({ referenceImages: images }),
+  referenceImageNames: [],
+  setReferenceImages: (images) => set({ referenceImages: images, referenceImageNames: [] }),
+  setReferenceImageInputs: (images) => set({ inputMode: "image", referenceImages: images.map((image) => image.data), referenceImageNames: images.map((image) => image.name) }),
   initialPrompt: "",
   setInitialPrompt: (prompt) => set({ initialPrompt: prompt }),
   assetsById: {},
@@ -102,6 +114,18 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       return { assetsById: merged };
     }),
   resetPromptAssets: () => set({ assetsById: {} }),
+
+  builtRun: null,
+  builtVersion: "current",
+  setBuiltRun: (next) => set((state) => {
+    const run = typeof next === "function" ? next(state.builtRun) : next;
+    const changed = run?.run_id !== state.builtRun?.run_id || run?.result?.candidate_name !== state.builtRun?.result?.candidate_name;
+    return { builtRun: run, builtVersion: changed ? "current" : state.builtVersion };
+  }),
+  setBuiltVersion: (version) => {
+    useAppStore.getState().disableInSelectAndEditMode();
+    set({ builtVersion: version });
+  },
 
   // Outputs
   commits: {},

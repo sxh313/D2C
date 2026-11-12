@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { ReactNode, useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useDropzone } from "react-dropzone";
 import { toast } from "react-hot-toast";
 import { Cross2Icon, ImageIcon } from "@radix-ui/react-icons";
@@ -7,28 +7,46 @@ import ScreenRecorder from "../../recording/ScreenRecorder";
 import { DesignSystemSelectorProps } from "../../settings/DesignSystemSelector";
 import { Stack } from "../../../lib/stacks";
 import ScreenshotToCodeControls from "../ScreenshotToCodeControls";
+import { fileToDataURL } from "../file-reader";
 
-function fileToDataURL(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      const mimeType =
-        file.type ||
-        (file.name.toLowerCase().endsWith(".mov") ? "video/quicktime" : "");
-      if (result.startsWith("data:application/octet-stream") && mimeType) {
-        const correctedResult = result.replace(
-          "data:application/octet-stream",
-          `data:${mimeType}`
-        );
-        resolve(correctedResult);
-      } else {
-        resolve(result);
-      }
+// Clipboard and drop uploads share the same reader and accepted-file callback
+// in the native app and the controlled multi-source workbench.
+function useImagePaste(onFiles: (files: File[]) => void, ready = true) {
+  const callback = useRef(onFiles);
+  callback.current = onFiles;
+  const queued = useRef<File[]>([]);
+  useEffect(() => {
+    const paste = (event: ClipboardEvent) => {
+      const files = Array.from(event.clipboardData?.items || []).filter((item) => item.type.startsWith("image/"))
+        .map((item) => item.getAsFile()).filter((file): file is File => file !== null);
+      if (!files.length) return;
+      event.preventDefault();
+      if (ready) callback.current(files);
+      else queued.current.push(...files);
     };
-    reader.onerror = (error) => reject(error);
-    reader.readAsDataURL(file);
+    document.addEventListener("paste", paste);
+    return () => document.removeEventListener("paste", paste);
+  }, [ready]);
+  useEffect(() => { if (ready && queued.current.length) callback.current(queued.current.splice(0)); }, [ready]);
+}
+
+export function ProjectUploadTab({ onFiles, ready, children }: {
+  onFiles: (files: File[]) => void; ready: boolean; children?: ReactNode;
+}) {
+  useImagePaste(onFiles, ready);
+  const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
+    noClick: true, disabled: !ready,
+    accept: { "image/png": [".png"], "image/jpeg": [".jpg", ".jpeg"] },
+    onDrop: (accepted, rejected) => onFiles([...accepted, ...rejected.map((item) => item.file)]),
   });
+  return <div>
+    <div {...getRootProps({ className: `d2c-drop ${isDragActive ? "is-dragging" : ""}` })} data-testid="upload-dropzone">
+      <input {...getInputProps()} data-testid="upload-input" aria-label="上传截图" />
+      <div className="d2c-drop-icon"><ImageIcon /></div><strong>拖入截图，或 <button type="button" disabled={!ready} onClick={open}>选择图片</button></strong>
+      <span>也可以直接 Ctrl + V 粘贴</span>
+    </div>
+    {children}
+  </div>;
 }
 
 type FileWithPreview = {
@@ -192,6 +210,8 @@ function UploadTab({ doCreate, stack, setStack, designSystem }: Props) {
     },
     [files, uploadedInputMode]
   );
+
+  useImagePaste(handleAddFiles);
 
   const {
     getRootProps,
